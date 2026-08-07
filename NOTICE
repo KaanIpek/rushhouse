@@ -1,0 +1,100 @@
+RUSHHOUSE — third-party notices
+===============================
+
+This file covers the parts of the build that came from somewhere other than this
+project's own code and art.
+
+--------------------------------------------------------------------------
+Music — the four soundtrack loops
+--------------------------------------------------------------------------
+
+  Assets/Resources/Music/menu.wav      (96 BPM, F major)
+  Assets/Resources/Music/service.wav   (124 BPM, C major)
+  Assets/Resources/Music/rush.wav      (156 BPM, D minor)
+  Assets/Resources/Music/result.wav    (88 BPM, Bb major)
+
+Generated locally with Stable Audio 3 (stabilityai/stable-audio-3-small-music)
+by Tools/music_gen.py. Nothing was uploaded and no third-party service was used
+to make them; Assets/Resources/Music/prompts.json records the exact prompt,
+model, seed and step count behind every file.
+
+  This Stability AI Model is licensed under the Stability AI Community License,
+  Copyright (c) Stability AI Ltd. All Rights Reserved.
+
+  Powered by Stability AI.
+
+The model bundles a Gemma-derived text encoder, redistributed under the Gemma
+Terms of Use:
+
+  Gemma is provided under and subject to the Gemma Terms of Use found at
+  ai.google.dev/gemma/terms
+
+The full Community License text is at https://stability.ai/community-license.
+
+What that licence means for this game, in plain terms:
+
+  - The audio files themselves are OURS. Section IV(c)(iii) of the Community
+    License assigns ownership of a model's outputs to whoever generated them, so
+    shipping and selling these tracks is ours to do.
+  - The attribution above is required whenever the game is distributed, which is
+    why "Powered by Stability AI" also appears on the in-game AUDIO screen and in
+    the README, not only in this file.
+  - Commercial use is free while annual revenue stays under USD $1,000,000, but
+    it must be REGISTERED at https://stability.ai/community-license. Any build
+    that takes money is a commercial use. Register before it does.
+  - Above $1M annual revenue the grant terminates and an enterprise licence is
+    required.
+
+--------------------------------------------------------------------------
+Sound effects
+--------------------------------------------------------------------------
+
+Every sound effect is synthesised at runtime (PlayTone in RushhouseUnityGame.cs)
+from plain sine tones. No sample libraries are used and nothing above applies to
+them. If the music files are absent the game still runs — SetMusic treats a
+missing clip as silence rather than an error.
+
+--------------------------------------------------------------------------
+3D models
+--------------------------------------------------------------------------
+
+Assets/Resources/Models3D/** are the project owner's own generated assets,
+supplied as FBX/OBJ with a single diffuse map each.
+
+--------------------------------------------------------------------------
+Advertising SDK
+--------------------------------------------------------------------------
+
+Assets/GoogleMobileAds/** and Assets/ExternalDependencyManager/** are the Google
+Mobile Ads Unity plugin (v11.3.0), redistributed under the Android Software
+Development Kit License Agreement / Apache License 2.0 as applicable:
+
+  https://developers.google.com/admob/terms
+  https://github.com/googleads/googleads-mobile-unity
+
+Rushhouse uses REWARDED ads only -- the player opts in to each one in exchange
+for a stated reward. There are no banners and no interstitials.
+
+The App ID and ad unit ids currently compiled in are GOOGLE'S OFFICIAL TEST IDS
+(ca-app-pub-3940256099942544/...). They always fill and never earn. Before any
+public release, register the app in AdMob and swap them:
+
+  Unity -batchmode -quit -projectPath . -executeMethod RushhouseAdMobSetup.Apply     -adMobAndroidAppId ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY
+
+and set RushhouseAds.LiveRewardedAndroid / LiveRewardediOS to the rewarded unit
+ids. Shipping live ids while testing, or tapping your own live ads, is the usual
+way an AdMob account gets suspended.
+
+--------------------------------------------------------------------------
+Characters
+--------------------------------------------------------------------------
+
+SourceArt/QuaterniusUltimateCharacters_CC0/** are Quaternius' Ultimate Animated
+Character pack, released under CC0 1.0 (public domain dedication):
+
+  https://quaternius.com  |  https://creativecommons.org/publicdomain/zero/1.0/
+
+No attribution is legally required for CC0; it is recorded here because knowing
+where an asset came from matters more than the licence minimum. The wardrobe
+outfits in Assets/Resources/Art/CharactersRigged are renders of these models
+with recoloured materials (Tools/render_outfits.py) and remain CC0-derived.

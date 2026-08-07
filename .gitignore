@@ -1,0 +1,78 @@
+# ---- Unity generated -------------------------------------------------------
+# Library and Temp are rebuilt from Assets + ProjectSettings on first open. They
+# are also the largest folders here (446 MB) and would make the repo unusable.
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Uu]ser[Ss]ettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# Never commit an IDE's generated project files -- they embed absolute paths
+# from whoever last opened the project.
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+.vs/
+.idea/
+.vscode/
+
+# Crash reports and asset-import noise
+sysinfo.txt
+*.stackdump
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# ---- This project ----------------------------------------------------------
+# Rendered-art backups and retired assets: 183 MB of history that the game does
+# not need to build. _char_dark_backup holds the RAW Blender renders that
+# Tools/brighten_chars.py processes into Assets/. Losing it does not break the
+# build (the processed art is committed) but it does mean brighten_chars.py
+# cannot re-run until you re-render -- the script detects this and refuses
+# rather than double-applying its LUT to already-brightened art.
+Tools/_char_dark_backup/
+Tools/_unused_assets/
+Tools/_pre3d_art_backup/
+Tools/_painterly_food_backup/
+Tools/_painterly_object_backup/
+Tools/_placeholder_anim_backup/
+Tools/__pycache__/
+__pycache__/
+*.pyc
+
+# Diagnostic renders written by the Blender probe scripts
+_probe_out/
+_CharacterPreview/
+
+# ---- Credentials: nothing here should ever exist, but be explicit ----------
+# Rushhouse has no backend and no keys. These patterns are a tripwire so that a
+# future addition (Supabase, Firebase, a signing key) cannot be committed by
+# reflex. Real values belong in GitHub Secrets, never in the tree.
+*.p8
+*.p12
+*.pem
+*.cer
+*.mobileprovision
+*.keystore
+*.jks
+.env
+.env.*
+google-services.json
+GoogleService-Info.plist
+secrets.json
+**/ServiceAccount*.json

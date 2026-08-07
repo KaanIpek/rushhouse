@@ -1,0 +1,29 @@
+# Unity YAML assets and source stay text; everything binary is marked so git does
+# not try to normalise line endings inside a PNG or an FBX.
+* text=auto eol=lf
+*.cs text eol=lf diff=csharp
+*.py text eol=lf diff=python
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.meta text eol=lf
+*.asset text eol=lf
+*.unity text eol=lf
+*.prefab text eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.fbx binary
+*.obj binary
+*.blend binary
+*.dll binary
+*.so binary
+*.a binary
+*.aar binary
+*.jar binary
+*.exe binary

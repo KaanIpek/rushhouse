@@ -1,0 +1,35 @@
+{
+  "model": "small-music",
+  "steps": 60,
+  "seed": 11,
+  "tracks": {
+    "menu": {
+      "bpm": 96,
+      "key": "F major",
+      "seconds": 32,
+      "mood": "warm cozy jazz cafe loop, soft brushed drums, gentle upright bass, mellow rhodes piano and vibraphone, relaxed and inviting, no vocals",
+      "prompt": "warm cozy jazz cafe loop, soft brushed drums, gentle upright bass, mellow rhodes piano and vibraphone, relaxed and inviting, no vocals, 96 BPM, F major, seamless loop, instrumental video game music, clean mix"
+    },
+    "service": {
+      "bpm": 124,
+      "key": "C major",
+      "seconds": 32,
+      "mood": "bouncy upbeat kitchen jazz, light swing drums, walking upright bass, playful clarinet and vibraphone, busy and cheerful, no vocals",
+      "prompt": "bouncy upbeat kitchen jazz, light swing drums, walking upright bass, playful clarinet and vibraphone, busy and cheerful, no vocals, 124 BPM, C major, seamless loop, instrumental video game music, clean mix"
+    },
+    "rush": {
+      "bpm": 156,
+      "key": "D minor",
+      "seconds": 32,
+      "mood": "fast frantic gypsy jazz, driving swing drums, urgent walking bass, wild clarinet and muted trumpet, comedic panic, no vocals",
+      "prompt": "fast frantic gypsy jazz, driving swing drums, urgent walking bass, wild clarinet and muted trumpet, comedic panic, no vocals, 156 BPM, D minor, seamless loop, instrumental video game music, clean mix"
+    },
+    "result": {
+      "bpm": 88,
+      "key": "Bb major",
+      "seconds": 24,
+      "mood": "warm satisfied jazz outro, soft brushed drums, mellow vibraphone and rhodes, calm and resolved, no vocals",
+      "prompt": "warm satisfied jazz outro, soft brushed drums, mellow vibraphone and rhodes, calm and resolved, no vocals, 88 BPM, Bb major, seamless loop, instrumental video game music, clean mix"
+    }
+  }
+}
