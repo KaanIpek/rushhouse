@@ -3,6 +3,7 @@ using System.Collections;
 using UnityEngine;
 #if UNITY_ANDROID || UNITY_IOS
 using GoogleMobileAds.Api;
+using GoogleMobileAds.Common;   // MobileAdsEventExecutor: ad callbacks arrive off the main thread
 #endif
 
 /// <summary>
@@ -71,9 +72,21 @@ public class RushhouseAds : MonoBehaviour
     void Init()
     {
 #if UNITY_ANDROID || UNITY_IOS
-        // Initialisation is asynchronous and can fail (no network, no consent yet). Either way the
-        // callback fires, and if it does not, Ready simply stays false and Show simulates.
-        MobileAds.Initialize(_ => { Initialised = true; Load(); });
+        // CONSENT FIRST. Initialising the ads SDK before the CMP has resolved requests ads before
+        // consent is known, which is exactly what the GDPR gate exists to prevent. RushhouseConsent
+        // always calls back, including on network failure, so this cannot deadlock.
+        RushhouseConsent.Gather(() => {
+            if (!RushhouseConsent.CanRequestAds) {
+                // Consent refused: no SDK init, no ad requests. Show() then falls through to the
+                // simulated path, so the player still gets their reward and the offer UI still works.
+                Initialised = true;
+                Debug.Log("ADS consent refused - running without the ads SDK");
+                return;
+            }
+            // Must be on the main thread in v11 with the next-gen Android SDK.
+            MobileAdsEventExecutor.ExecuteInUpdate(() =>
+                MobileAds.Initialize(_ => { Initialised = true; Load(); }));
+        });
 #else
         Initialised = true;   // desktop/editor: simulation only, and that is the intended path
 #endif
@@ -122,11 +135,18 @@ public class RushhouseAds : MonoBehaviour
             // BOTH exits must call back. Subscribing only to Closed leaves the caller waiting
             // forever when the ad fails to present (no fill mid-show, process interruption), and
             // the offer sheet that opened it would sit on screen with no way out.
+            //
+            // MAIN THREAD: the Google Mobile Ads SDK raises every ad callback on a BACKGROUND
+            // thread. onDone rebuilds Unity UI, which from a background thread throws or silently
+            // does nothing. MobileAdsEventExecutor.ExecuteInUpdate defers it to the next frame on
+            // the main thread — without it the reward appears to be granted but no UI ever updates.
             Action<bool> finish = ok => {
                 if (finished) return;
                 finished = true;
-                Showing = false;
-                onDone?.Invoke(ok);
+                MobileAdsEventExecutor.ExecuteInUpdate(() => {
+                    Showing = false;
+                    onDone?.Invoke(ok);
+                });
             };
             rewarded.OnAdFullScreenContentClosed += () => finish(earned);
             rewarded.OnAdFullScreenContentFailed += _ => finish(false);

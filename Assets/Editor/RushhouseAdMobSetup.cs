@@ -44,14 +44,32 @@ public static class RushhouseAdMobSetup
         }
         const System.Reflection.BindingFlags anyInstance = System.Reflection.BindingFlags.Public
             | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
-        settingsType.GetProperty("AdMobAndroidAppId", anyInstance)?.SetValue(instance, android);
-        settingsType.GetProperty("AdMobIOSAppId", anyInstance)?.SetValue(instance, ios);
+        // The property names are GoogleMobileAdsAndroidAppId / GoogleMobileAdsIOSAppId, NOT
+        // AdMobAndroidAppId (that is the private FIELD). A first version used the field names,
+        // and because GetProperty returns null for a name that does not exist, the null-conditional
+        // call did nothing and this method still reported success — the asset stayed empty and
+        // would have failed the iOS build on CI with an error pointing at AdMob.
+        var androidProp = settingsType.GetProperty("GoogleMobileAdsAndroidAppId", anyInstance);
+        var iosProp = settingsType.GetProperty("GoogleMobileAdsIOSAppId", anyInstance);
+        if (androidProp == null || iosProp == null) {
+            Debug.LogError("ADMOB_SETUP app-id properties not found on " + settingsType.FullName);
+            EditorApplication.Exit(1);
+            return;
+        }
+        androidProp.SetValue(instance, android);
+        iosProp.SetValue(instance, ios);
         EditorUtility.SetDirty((Object)instance);
         AssetDatabase.SaveAssets();
 
+        // Read the values BACK off the asset. Reporting what we intended to write is how the
+        // previous version claimed success while writing nothing.
+        string wroteAndroid = (string)androidProp.GetValue(instance);
+        string wroteIOS = (string)iosProp.GetValue(instance);
+        bool ok = wroteAndroid == android && wroteIOS == ios;
         bool isTest = android == TestAppIdAndroid;
-        Debug.Log("ADMOB_SETUP android=" + android + " ios=" + ios + " mode=" + (isTest ? "TEST" : "LIVE"));
-        EditorApplication.Exit(0);
+        Debug.Log("ADMOB_SETUP android=" + wroteAndroid + " ios=" + wroteIOS
+            + " mode=" + (isTest ? "TEST" : "LIVE") + " verified=" + ok);
+        EditorApplication.Exit(ok ? 0 : 1);
     }
 
     static string Arg(string name)

@@ -21,6 +21,17 @@ public static class RushhouseReleaseSettings
     [MenuItem("Rushhouse/Apply Release Settings")]
     public static void Apply()
     {
+        if (!ApplySettings()) { EditorApplication.Exit(1); return; }
+        EditorApplication.Exit(0);
+    }
+
+    /// <summary>
+    /// The settings themselves, WITHOUT exiting the editor. BuildIOSProject calls this so one
+    /// editor launch does settings + build: a second launch would claim the Unity Personal
+    /// licence seat again, and Personal allows very few simultaneous activations.
+    /// </summary>
+    public static bool ApplySettings()
+    {
         string bundleId = Arg("-bundleId") ?? DefaultBundleId;
         string version = Arg("-appVersion") ?? "1.0.0";
         string build = Arg("-buildNumber") ?? "1";
@@ -42,6 +53,24 @@ public static class RushhouseReleaseSettings
         PlayerSettings.allowedAutorotateToLandscapeLeft = false;
         PlayerSettings.allowedAutorotateToLandscapeRight = false;
 
+        // ---- App icon: an UPLOAD blocker, not decoration ----
+        // Empty icon slots make Unity omit CFBundleIconName and asset validation rejects the
+        // binary. The source must be square, opaque and un-rounded (Apple masks it itself);
+        // Tools/make_icon.py produces exactly that.
+        var icon = AssetDatabase.LoadAssetAtPath<Texture2D>("Assets/Resources/Icon/app_icon.png");
+        if (icon == null) {
+            Debug.LogError("RELEASE_SETTINGS icon missing - run: python Tools/make_icon.py");
+            return false;
+        }
+        foreach (var target in new[] { UnityEditor.Build.NamedBuildTarget.iOS,
+                                       UnityEditor.Build.NamedBuildTarget.Android,
+                                       UnityEditor.Build.NamedBuildTarget.Standalone }) {
+            int[] sizes = PlayerSettings.GetIconSizes(target, IconKind.Application);
+            var icons = new Texture2D[sizes.Length];
+            for (int i = 0; i < icons.Length; i++) icons[i] = icon;
+            if (icons.Length > 0) PlayerSettings.SetIcons(target, icons, IconKind.Application);
+        }
+
         // ---- iOS ----
         PlayerSettings.iOS.buildNumber = build;
         PlayerSettings.iOS.appleEnableAutomaticSigning = true;
@@ -52,6 +81,13 @@ public static class RushhouseReleaseSettings
         // Declares "no non-exempt encryption". Without it every single TestFlight build stops and
         // asks the export-compliance questionnaire before testers can install.
         PlayerSettings.iOS.useOnDemandResources = false;
+        // Deployment target. Left empty, Unity picks its own floor and Xcode 27 will refuse it;
+        // 15.0 is the current supported floor and covers every device that can run this game.
+        PlayerSettings.iOS.targetOSVersionString = "15.0";
+        // The team id is NOT a secret (it is printed inside every signed binary) but it is
+        // account-specific, so CI passes it in rather than the repo carrying a stale one.
+        string team = Arg("-teamId");
+        if (!string.IsNullOrEmpty(team)) PlayerSettings.iOS.appleDeveloperTeamID = team;
 
         // ---- Android ----
         PlayerSettings.Android.bundleVersionCode = int.TryParse(build, out int code) ? code : 1;
@@ -60,10 +96,12 @@ public static class RushhouseReleaseSettings
         PlayerSettings.SetScriptingBackend(UnityEditor.Build.NamedBuildTarget.iOS, ScriptingImplementation.IL2CPP);
 
         AssetDatabase.SaveAssets();
-        Debug.Log("RELEASE_SETTINGS bundleId=" + bundleId + " version=" + version + " build=" + build
+        Debug.Log("RELEASE_SETTINGS iosMin=" + PlayerSettings.iOS.targetOSVersionString
+            + " team=" + (string.IsNullOrEmpty(PlayerSettings.iOS.appleDeveloperTeamID) ? "(from CI)" : PlayerSettings.iOS.appleDeveloperTeamID)
+            + " bundleId=" + bundleId + " version=" + version + " build=" + build
             + " company=" + PlayerSettings.companyName + " product=" + PlayerSettings.productName
             + " orientation=" + PlayerSettings.defaultInterfaceOrientation);
-        EditorApplication.Exit(0);
+        return true;
     }
 
     static string Arg(string name)

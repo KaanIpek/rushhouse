@@ -1,0 +1,245 @@
+# Rushhouse -> TestFlight, from a Windows machine with no Mac.
+#
+# Two jobs on purpose:
+#
+#   1. `xcode-project` on ubuntu-latest, in GameCI's Docker image. Unity + the iOS module already
+#      live in that image, so nothing is installed at run time. Running Unity on the macOS runner
+#      instead means `brew install unity-hub` plus a full editor download on every run.
+#   2. `archive` on macos-latest, which is the only place xcodebuild and CocoaPods exist.
+#
+# Public repositories get free, unmetered GitHub-hosted runners including macOS, so this costs
+# nothing. NOTHING in this file is a secret; every credential comes from repo Settings ->
+# Secrets and variables -> Actions.
+#
+# Required secrets (7):
+#   UNITY_LICENSE       full XML contents of C:\ProgramData\Unity\Unity_lic.ulf (free Personal)
+#   UNITY_EMAIL         Unity account email
+#   UNITY_PASSWORD      Unity account password
+#   ASC_KEY_ID          App Store Connect API key id
+#   ASC_ISSUER_ID       App Store Connect issuer id
+#   ASC_KEY_P8_B64      base64 of the .p8 private key  (the KEY MUST HAVE THE **ADMIN** ROLE:
+#                       App Manager can read /v1/certificates but cannot CREATE the distribution
+#                       certificate, and that only fails minutes into -exportArchive)
+#   APPLE_TEAM_ID       10-character team id
+#
+# The Apple secrets are the same ones this account already uses for its other game; they can be
+# copied across verbatim.
+
+name: ios-testflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'CFBundleVersion. Must be unique and increasing per upload.'
+        required: true
+        default: '1'
+      release_notes:
+        description: 'What testers see in TestFlight'
+        required: false
+        default: 'Rushhouse build'
+
+concurrency:
+  # A Unity Personal licence allows very few simultaneous activations, and a cancelled run leaks
+  # the seat. Serialising the workflow keeps the next run from failing activation for a reason
+  # that has nothing to do with the change being tested.
+  group: ios-testflight
+  cancel-in-progress: false
+
+jobs:
+  xcode-project:
+    name: Unity -> Xcode project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # game-ci/unity-builder pulls the right unityci/editor image, activates the licence and
+      # runs the build. A hand-rolled version that copies Unity_lic.ulf into ~/.local/share/unity3d
+      # and calls the editor directly does NOT activate a Unity 6 editor: the serial has to be
+      # parsed out of the .ulf's DeveloperData (base64-decoded, first 4 bytes dropped), which is
+      # exactly what this action already does. Use the action.
+      - name: Build the Xcode project
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          unityVersion: 6000.4.8f1
+          targetPlatform: iOS
+          buildMethod: RushhouseSceneBuilder.BuildIOSProject
+          buildsPath: Builds
+          # Release settings (bundle id, icons, portrait, iOS 15 floor, build number) are applied
+          # inside BuildIOSProject rather than by a second editor launch, so the licence seat is
+          # claimed once -- Personal allows very few simultaneous activations and a cancelled run
+          # leaks the seat.
+          customParameters: -buildNumber ${{ inputs.build_number }} -teamId ${{ secrets.APPLE_TEAM_ID }}
+          allowDirtyBuild: true
+
+      # actions/upload-artifact DOES NOT PRESERVE THE EXECUTABLE BIT. Unity's iOS output contains
+      # MapFileParser.sh and process_symbols.sh, which then arrive on the Mac non-executable and
+      # fail deep inside a build phase with a bare "Permission denied" naming no file. Tar it.
+      - name: Pack the Xcode project (tar keeps the +x bit)
+        run: |
+          sudo chown -R $(id -u):$(id -g) Builds
+          ls Builds
+          tar -czf xcode-project.tar.gz -C Builds iOS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xcode-project
+          path: xcode-project.tar.gz
+          retention-days: 3
+
+  archive:
+    name: Archive, sign, upload to TestFlight
+    needs: xcode-project
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: xcode-project
+
+      - name: Unpack
+        run: |
+          mkdir -p "$RUNNER_TEMP/ios"
+          tar -xzf xcode-project.tar.gz -C "$RUNNER_TEMP/ios"
+          ls -l "$RUNNER_TEMP/ios/iOS"
+
+      # The runner image ships several Xcodes and its default is not always the newest. Apple has
+      # required the iOS 26 SDK since 2026-04-28 and CHECKS IT AT UPLOAD -- archive and export both
+      # succeed, then App Store Connect returns a 409 about the SDK version. Print the SDK so the
+      # log answers "what was this built with" without anyone guessing.
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          NEWEST=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "selecting $NEWEST"
+          sudo xcode-select -s "$NEWEST/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
+
+      # `secrets` is NOT a valid context inside `if:` -- writing `if: secrets.X != ''` does not
+      # evaluate false, it makes the YAML invalid and the run reports zero jobs with no error.
+      # Read the secret into a step env and gate on the step's output instead.
+      - name: Do we have signing secrets?
+        id: keys
+        env:
+          P8: ${{ secrets.ASC_KEY_P8_B64 }}
+        run: |
+          if [ -n "$P8" ]; then echo "signed=true" >> "$GITHUB_OUTPUT"
+          else echo "signed=false" >> "$GITHUB_OUTPUT"; fi
+
+      # Google Mobile Ads is a CocoaPod, not a vendored framework. EDM4U cannot run `pod install`
+      # from a non-macOS editor, so it never ran in job 1 -- it has to happen here, and everything
+      # after this must build the WORKSPACE, not the project. Building Unity-iPhone.xcodeproj links
+      # without the pods and fails with missing GAD symbols, mentioning nothing about CocoaPods.
+      - name: pod install
+        working-directory: ${{ runner.temp }}/ios/iOS
+        run: |
+          if [ -f Podfile ]; then
+            pod install --repo-update
+            ls -d Unity-iPhone.xcworkspace
+          else
+            echo "no Podfile - the ads SDK did not emit one; check EDM4U ran"
+            exit 1
+          fi
+
+      - name: Stage the App Store Connect key
+        if: steps.keys.outputs.signed == 'true'
+        run: |
+          mkdir -p ~/private_keys
+          echo "${{ secrets.ASC_KEY_P8_B64 }}" | base64 --decode > ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8
+          chmod 600 ~/private_keys/*.p8
+
+      # ARCHIVE UNSIGNED, SIGN AT EXPORT. Signing the archive needs a certificate in a keychain;
+      # signing at export lets -allowProvisioningUpdates ask Apple for exactly one distribution
+      # profile using the API key. This is the shape that works with no Mac and no registered
+      # devices -- "your team has no devices from which to generate a provisioning profile" means
+      # Xcode was asked for a DEVELOPMENT profile, which is built from devices; distribution
+      # profiles need none.
+      # -scheme assumes Unity emitted a SHARED scheme. If it emitted a user scheme the archive
+      # fails with "scheme not found" and the log offers nothing to act on. List them first.
+      - name: List schemes
+        working-directory: ${{ runner.temp }}/ios/iOS
+        run: xcodebuild -list -workspace Unity-iPhone.xcworkspace
+
+      - name: Archive (unsigned)
+        working-directory: ${{ runner.temp }}/ios/iOS
+        run: |
+          xcodebuild \
+            -workspace Unity-iPhone.xcworkspace \
+            -scheme Unity-iPhone \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Rushhouse.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            archive
+
+      # Every upload-stage rejection (CFBundleIconName, missing GADApplicationIdentifier, SDK
+      # version) is visible in the archive in two seconds. ITMS errors otherwise arrive by EMAIL
+      # ten minutes later, somewhere nobody is watching.
+      - name: Check the built Info.plist
+        run: |
+          PLIST=$(ls "$RUNNER_TEMP"/Rushhouse.xcarchive/Products/Applications/*.app/Info.plist | head -1)
+          echo "reading $PLIST"
+          for key in CFBundleIdentifier CFBundleVersion CFBundleShortVersionString \
+                     CFBundleIconName GADApplicationIdentifier ITSAppUsesNonExemptEncryption \
+                     MinimumOSVersion DTSDKName; do
+            printf '%-34s ' "$key"
+            /usr/libexec/PlistBuddy -c "Print :$key" "$PLIST" 2>/dev/null || echo "(MISSING)"
+          done
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$PLIST" >/dev/null 2>&1 \
+            || { echo "::error::CFBundleIconName missing - the app icon did not reach the build"; exit 1; }
+
+      - name: Export a signed .ipa
+        if: steps.keys.outputs.signed == 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          # method must be app-store-connect on Xcode 15.3+; the old `app-store` still works but
+          # warns. NEVER set testFlightInternalTestingOnly -- such a build is permanently barred
+          # from external TestFlight and the App Store, with no promote-later path.
+          cat > ExportOptions.plist <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>destination</key><string>export</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/Rushhouse.xcarchive" \
+            -exportPath "$RUNNER_TEMP/export" \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}
+          ls -l "$RUNNER_TEMP/export"
+
+      - name: Upload to TestFlight
+        if: steps.keys.outputs.signed == 'true'
+        run: |
+          # altool's NOTARIZATION was removed in 2023 (that is what "altool is deprecated" refers
+          # to); --upload-app for App Store submissions still works.
+          xcrun altool --upload-app -f "$RUNNER_TEMP"/export/*.ipa -t ios \
+            --apiKey "${{ secrets.ASC_KEY_ID }}" \
+            --apiIssuer "${{ secrets.ASC_ISSUER_ID }}"
+          echo "Uploaded. Processing takes a few minutes."
+          echo "NOTE: a build assigned to NO tester group is valid and completely invisible --"
+          echo "testers keep being offered the previous build with no error anywhere."
+
+      - name: Keep the archive when signing is not configured
+        if: steps.keys.outputs.signed != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-xcarchive
+          path: ${{ runner.temp }}/Rushhouse.xcarchive
+          retention-days: 3
