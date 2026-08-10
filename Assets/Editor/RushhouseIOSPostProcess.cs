@@ -1,4 +1,9 @@
-#if UNITY_IOS
+// NO `#if UNITY_IOS` GUARD. That symbol is only defined when the editor's ACTIVE build target
+// is iOS, and an editor launched with a Windows target does not redefine it just because
+// BuildPipeline.BuildPlayer is handed BuildTarget.iOS. The first local iOS build silently skipped
+// this whole file for exactly that reason and produced an Xcode project with no
+// ITSAppUsesNonExemptEncryption. Compile always; decide at runtime from the buildTarget argument.
+// UnityEditor.iOS.Xcode ships with the iOS module, which both this machine and the CI image have.
 using UnityEditor;
 using UnityEditor.Callbacks;
 using UnityEditor.iOS.Xcode;
@@ -45,4 +50,3 @@ public static class RushhouseIOSPostProcess
             + plistPath);
     }
 }
-#endif
