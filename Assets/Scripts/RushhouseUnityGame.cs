@@ -352,6 +352,7 @@ public class RushhouseUnityGame : MonoBehaviour
     Appliance tapAction;
     bool hasMoveTarget;
     Vector2 playerWaypoint; float playerPathTimer;   // cached A* for the player
+    float playerStall;                               // how long we've been wedged; drives re-route then give-up
     float spawnTimer;
     float shiftTime;
     float maxShiftTime;
@@ -2054,11 +2055,17 @@ public class RushhouseUnityGame : MonoBehaviour
         // wall line like a floating post). A plain column in the wall's own material seals the join
         // cleanly and always faces correctly.
         Material cornerMat = WorldMaterial("corner-col", null, new Color(.52f, .35f, .21f), Vector2.one);
-        Material cornerCap = WorldMaterial("corner-cap", null, new Color(.68f, .49f, .30f), Vector2.one);
+        // The corner must SPAN the gap, not sit in the middle of it. The back modules only begin at
+        // all.xMin + cornerSpan, and the old 0.42-wide column reached just xMin+0.19 -- leaving a
+        // 0.58-wide hole at full wall height at BOTH ends of the storefront. That hole, plus a pale
+        // 0.5x0.5 "corner-cap" slab floating at lift 1.09 (above the 1.0/1.05 wall tops, in a lighter
+        // colour, its top face turned to camera), is what read as the broken wall either side of the
+        // entrance. The cap is gone -- the column's own top already lands at 1.06, flush with the
+        // back modules -- and the column now runs from the side wall's outer face to the first module.
+        float cornerW = cornerSpan + .3f;
         for (int s = 0; s < 2; s++) {
-            float cxp = s == 0 ? all.xMin - .02f : all.xMax + .02f;
-            MakeBox3D("corner-col-" + s, new Vector2(cxp, backY - .02f), new Vector2(.42f, .42f), 1.06f, cornerMat, .53f, true);
-            MakeBox3D("corner-cap-" + s, new Vector2(cxp, backY - .02f), new Vector2(.5f, .5f), .1f, cornerCap, 1.09f, true);
+            float cxp = s == 0 ? all.xMin + cornerSpan * .5f - .12f : all.xMax - cornerSpan * .5f + .12f;
+            MakeBox3D("corner-col-" + s, new Vector2(cxp, backY - .02f), new Vector2(cornerW, .42f), 1.06f, cornerMat, .53f, true);
         }
         MakeArchitecturalModel("entrance-gate", "gate", new Vector2(0f, backY - .035f), backPiece * .72f, .14f, .9f, 0f);
         var pictureFrame = MakeArchitecturalModel("back-picture-frame", "frame",
@@ -2075,7 +2082,13 @@ public class RushhouseUnityGame : MonoBehaviour
         MakeArchitecturalModel("divider-right-mesh", "kitchenwall", new Vector2(gap + segW * .5f, divY), segW, .28f, .72f, 0f);
     }
 
-    const float DoorHalfGap = 1.0f;                       // half-width of the divider doorway opening
+    // Half-width of the divider doorway. Was 1.0, which left only the two cell centres at x=+-0.28
+    // walkable for EVERY actor radius in use -- the whole restaurant had to thread a two-cell needle
+    // with effectively one route through it, so any contention or slightly off-centre approach
+    // jammed. Cell centres sit at +-0.28 and +-0.84; 1.12 clears +-0.84 with 0.08-0.12 to spare at
+    // radius 0.15-0.16, doubling the doorway's routing width. The drawn jambs and leaves are derived
+    // from this constant, so the art follows automatically.
+    const float DoorHalfGap = 1.12f;
     float DividerY() => CellCenter(0, DivRow).y;
 
     // soft shadow the 3 walls cast onto the floor edges — layered strips fake a gradient falloff
@@ -2116,9 +2129,12 @@ public class RushhouseUnityGame : MonoBehaviour
             MakeStretch("wall-left", ObjectSprite("wallSideL"), new Vector2(-sCx, sCy), new Vector2(sideThick, sideH), Color.white, -33);
             MakeStretch("wall-right", ObjectSprite("wallSideR"), new Vector2(sCx, sCy), new Vector2(sideThick, sideH), Color.white, -33);
             MakeStretch("wall-back", ObjectSprite("wallBackH"), new Vector2(0, backCy), new Vector2(sOuter * 2, backThick), Color.white, -32);
-            // corner pilasters cap each top corner so the side/back join reads as a real room corner
-            MakeStretch("wall-corner-l", ObjectSprite("wallCorner"), new Vector2(-sCx, backCy), new Vector2(sideThick * 1.12f, backThick * 1.06f), Color.white, -31);
-            MakeStretch("wall-corner-r", ObjectSprite("wallCornerR"), new Vector2(sCx, backCy), new Vector2(sideThick * 1.12f, backThick * 1.06f), Color.white, -31);
+            // NO corner pilasters here either. wallCorner/wallCornerR are SQUARE art (300x300) and
+            // were being stretched to 0.83 x 1.59, smearing the corner into a distorted slab. The
+            // back wall above already spans the full OUTER width (sOuter*2), so it covers the
+            // side/back junction unaided. NOTE this whole branch is the SPRITE FALLBACK -- the
+            // shipping scene builds the room from 3D meshes further up, and the corner fault the
+            // user actually saw lives there, in corner-col/corner-cap.
             // soft contact shadow where each side wall meets the floor, so the wall grounds into the room
             MakeBar("wall-l-foot", new Vector2(-Rr + .06f, cy), new Vector2(.12f, all.height), baseSh, -30);
             MakeBar("wall-r-foot", new Vector2(Rr - .06f, cy), new Vector2(.12f, all.height), baseSh, -30);
@@ -2296,6 +2312,10 @@ public class RushhouseUnityGame : MonoBehaviour
         if (a.type == "prep" && a.item != null) DrawFood(a.item.id, rect.center, .26f, "ready");
         if (a.type == "sink" && a.item != null) DrawHeld(a.item, rect.center, .26f);
         if (a.type == "sink" && holdTarget == a && holdProgress > 0) DrawWaterFlow(rect.center);
+        // The dirty plate a customer leaves behind belongs ON the table. It used to be drawn below,
+        // after spriteLift was reset to 0, which put it on the floor next to the table instead --
+        // every other station's contents are drawn here precisely because this block is lifted.
+        if (a.type == "table" && a.dirty) DrawHeld(Item.Plate(true), rect.center, .22f);
         if ((a.type == "hob" || a.type == "oven" || a.type == "espresso") && a.item != null && a.item.state != "burnt") {
             float cook = CookDuration();
             if (!IngredientReady(a.item)) {
@@ -2308,7 +2328,6 @@ public class RushhouseUnityGame : MonoBehaviour
         spriteLift = 0f;
         DrawStationEffects(a, rect);
         if (a.fire > 0) DrawFire(a, rect);
-        if (a.type == "table" && a.dirty) DrawHeld(Item.Plate(true), rect.center, .22f);
     }
 
     bool ShouldShowApplianceTag(Appliance a)
@@ -2716,7 +2735,16 @@ public class RushhouseUnityGame : MonoBehaviour
                 // dish sits centred ON the plate, small enough to stay inside its rim
                 Sprite dish = FinalDishSprite(completed.id) ?? CarrySprite(completed.id);
                 MakeSprite("carry-dish-" + completed.id, dish, p + new Vector2(0, size * .1f), Vector2.one * size * .72f, Color.white, carryOrder + 1);
-            } else DrawFinalDish(completed, p, size * 1.85f, 30);
+            } else {
+                // Same treatment as the carried version above: a plate with the dish ON it. This
+                // branch used to draw the dish ALONE at 1.85x and no plate at all, so a finished
+                // burger swallowed the plate it was supposedly sitting on and towered over the
+                // table. 0.92x is sized to sit inside the plate rim, matching the ingredient stack
+                // it replaces the instant the recipe completes -- otherwise the dish visibly jumps
+                // in size at that moment.
+                DrawSinglePlate(p, size, 28);
+                DrawFinalDish(completed, p + new Vector2(0, size * .12f), size * .92f, 30);
+            }
             return;
         }
         if (carryVisual) {
@@ -2936,10 +2964,16 @@ public class RushhouseUnityGame : MonoBehaviour
             }
             Vector2 next = Vector2.MoveTowards(playerPos, way, (2.2f + save.speed * .18f) * dt);
             Vector2 moved = MoveActorWithCollision(playerPos, next, .16f);
+            // Clipping a doorjamb for one frame is normal and is NOT a reason to abandon the trip.
+            // This used to drop moveTarget the very first frame collision ate the step, which is
+            // exactly why tapping across the room so often stopped dead at the kitchen door: one
+            // graze and the whole order was forgotten. Now a stall first forces a fresh route, and
+            // only a genuine wedge (most of a second with no progress at all) cancels.
             if (Vector2.Distance(moved, playerPos) < .002f && Vector2.Distance(playerPos, moveTarget) > .12f) {
-                hasMoveTarget = false;
-                tapAction = null;
-            }
+                playerStall += dt;
+                if (playerStall > .10f) { playerPathTimer = 0f; playerWaypoint = Vector2.zero; }
+                if (playerStall > .75f) { hasMoveTarget = false; tapAction = null; playerStall = 0f; }
+            } else playerStall = 0f;
             playerPos = moved;
             if (Vector2.Distance(playerPos, moveTarget) < .04f) {
                 hasMoveTarget = false;
@@ -6162,6 +6196,17 @@ public class RushhouseUnityGame : MonoBehaviour
         if (IsWalkablePosition(xOnly, radius, ignore)) return xOnly;
         Vector2 yOnly = new Vector2(current.x, target.y);
         if (IsWalkablePosition(yOnly, radius, ignore)) return yOnly;
+        // Both axes refused, so this is a corner — most often a door jamb approached slightly
+        // off-centre. Freezing here is what made actors press into the kitchen doorway forever.
+        // Slip sideways instead, at the same speed the step would have been, so the body slides
+        // along the frame until it lines up with the opening.
+        Vector2 dir = target - current;
+        float stepLen = dir.magnitude;
+        if (stepLen > 1e-5f) {
+            Vector2 perp = new Vector2(-dir.y, dir.x) / stepLen * stepLen;
+            if (IsWalkablePosition(current + perp, radius, ignore)) return current + perp;
+            if (IsWalkablePosition(current - perp, radius, ignore)) return current - perp;
+        }
         return current;
     }
 
@@ -6241,7 +6286,21 @@ public class RushhouseUnityGame : MonoBehaviour
                 if (!open.Contains(n)) open.Add(n);
             }
         }
-        if (!came.ContainsKey(goal)) return to;          // unreachable — fall back to straight steering
+        if (!came.ContainsKey(goal)) {
+            // Unreachable, or the search ran out of budget. Returning `to` here steered the actor
+            // straight at whatever was in the way and pinned it there — the classic "walks into the
+            // wall and stays". Aim for the explored cell that got CLOSEST to the goal instead: a
+            // partial route still makes real progress, and the next recompute finishes the job from
+            // nearer in.
+            Vector2Int bestNode = start; float bestDist = float.MaxValue;
+            foreach (var kv in gScore) {
+                if (kv.Key == start || !came.ContainsKey(kv.Key)) continue;
+                float d = Vector2Int.Distance(kv.Key, goal);
+                if (d < bestDist) { bestDist = d; bestNode = kv.Key; }
+            }
+            if (bestNode == start) return to;
+            goal = bestNode;
+        }
         Vector2Int step = goal;
         while (came.TryGetValue(step, out var prev) && prev != start) step = prev;
         return CellCenter(step.x, step.y);
