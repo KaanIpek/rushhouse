@@ -45,8 +45,19 @@ public static class RushhouseIOSPostProcess
         // without showing the prompt, or showing the prompt without the key, are both rejections;
         // see RushhouseConsent for the full reasoning and what to change if ATT is added later.
 
+        // CFBundleIconName is normally written by actool during the Xcode build, and the first CI
+        // archive came out WITHOUT it -- which asset validation rejects. The asset catalog was not
+        // the cause: Images.xcassets/AppIcon.appiconset was verified to hold all 19 entries with
+        // filenames, every PNG at the right size, RGB and opaque, including the 1024 ios-marketing
+        // icon, with ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon on all four configurations and
+        // the catalog present in the Resources build phase. Declaring the key here names that same
+        // AppIcon set, so the plist and the catalog agree rather than the key papering over a gap.
+        // The workflow additionally asserts Assets.car exists in the built .app, which is what
+        // would catch actool genuinely not having run.
+        root.SetString("CFBundleIconName", "AppIcon");
+
         plist.WriteToFile(plistPath);
-        Debug.Log("IOS_POSTPROCESS wrote ITSAppUsesNonExemptEncryption=false and portrait orientation to "
-            + plistPath);
+        Debug.Log("IOS_POSTPROCESS wrote ITSAppUsesNonExemptEncryption=false, CFBundleIconName=AppIcon"
+            + " and portrait orientation to " + plistPath);
     }
 }
