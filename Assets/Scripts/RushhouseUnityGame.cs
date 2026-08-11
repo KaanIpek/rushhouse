@@ -48,6 +48,8 @@ public class RushhouseUnityGame : MonoBehaviour
         public int adDay = 0;              // which game-day the daily ad allowance belongs to
         public int adsToday = 0;           // rewarded ads watched on that day
         public bool hapticsOn = true;// vibration toggle
+        public bool touchButtons = true;  // show the on-screen stick + ACT. Off = tap/hold to play.
+        public bool cameraFollow = false; // lock the camera to the chef instead of free framing
         public int stars = 3;       // restaurant star level 1..5 — drives how many guests show up
         public int bestDay = 1;
         public string layout = "";
@@ -285,7 +287,11 @@ public class RushhouseUnityGame : MonoBehaviour
     Light sunLight;
     float spriteLift;              // extra world height for the next Make* sprites (food ON counter tops)
     float spriteDepthBoost;        // pull the next sprites toward the camera so overlays never clip
-    const float TouchBand = .30f;  // bottom fraction reserved for the joystick/ACT controls
+    // Bottom fraction of the screen reserved for the stick/ACT pads, i.e. the strip where a touch
+    // steers instead of walking. Now derived from where the pads actually SIT (they end 40px above
+    // the bottom of a 1280 frame and are ~190 tall, so ~0.20) instead of a flat 0.30 that ate a
+    // third of the room. With the pads switched off nothing is reserved and the whole screen taps.
+    float TouchBand => (save != null && !save.touchButtons) ? 0f : .20f;
     const float CameraPitch = 38f; // low isometric view: vertical faces read as standing on the floor
     static readonly float GroundProjection = Mathf.Sin(CameraPitch * Mathf.Deg2Rad);
     const float CameraDistance = 24f;
@@ -353,6 +359,10 @@ public class RushhouseUnityGame : MonoBehaviour
     bool hasMoveTarget;
     Vector2 playerWaypoint; float playerPathTimer;   // cached A* for the player
     float playerStall;                               // how long we've been wedged; drives re-route then give-up
+    float pointerHold;                               // how long the pointer has been down on the world
+    bool pointerHoldAct;                             // holding on a station within reach = work it
+    GameObject actLabelGo;                           // hidden with the pads when buttons are off
+    Vector2 camFollowPos;                            // smoothed camera focus when locked to the chef
     float spawnTimer;
     float shiftTime;
     float maxShiftTime;
@@ -550,7 +560,18 @@ public class RushhouseUnityGame : MonoBehaviour
         // lift the framing with zoom so the entrance door stays in view below the top HUD while the
         // kitchen stays above the bottom controls; camPan lets the player drag around
         float cy = Mathf.Lerp(1.05f, 2.1f, Mathf.InverseLerp(5.4f, 8.9f, ortho));
-        Vector3 target = GameGroundPoint(new Vector2(camPan.x, cy + camPan.y), 0f);
+        Vector2 focus = new Vector2(camPan.x, cy + camPan.y);
+        // Optional lock-to-chef. Smoothed rather than rigid: a camera pinned exactly to a body that
+        // changes direction every step reads as the ROOM twitching, not the chef moving. The
+        // exponential lerp is frame-rate independent, and camPan still applies so a drag nudges the
+        // framing without breaking the follow. Offset upward so the chef sits below centre, clear of
+        // the top HUD.
+        if (save != null && save.cameraFollow && screen == ScreenMode.Play) {
+            if (camFollowPos == Vector2.zero) camFollowPos = playerPos;
+            camFollowPos = Vector2.Lerp(camFollowPos, playerPos, 1f - Mathf.Exp(-5.5f * Time.deltaTime));
+            focus = camFollowPos + new Vector2(camPan.x, camPan.y + .55f);
+        }
+        Vector3 target = GameGroundPoint(focus, 0f);
         camHome = target - cam.transform.forward * CameraDistance;
         // decaying camera shake (juice) on top of the framed home position
         if (shakeAmp > .0006f) {
@@ -635,23 +656,40 @@ public class RushhouseUnityGame : MonoBehaviour
         // The consent row only exists for players a CMP applies to (EEA/UK/Switzerland), so the
         // card grows for them rather than leaving a gap for everyone else.
         bool privacy = RushhouseConsent.PrivacyOptionsRequired;
-        AddCard(px, 420, pw, privacy ? 452 : 392, gold, "settings");
-        AddText("AUDIO", 360, 472, 30, gold, FontStyle.Bold);
-        AddText("Applies to every shift", 360, 500, 11, muted, FontStyle.Bold);
-        PauseToggle("MUSIC", save.musicOn, 522, () => { save.musicOn = !save.musicOn; }, Reopen);
-        PauseToggle("SOUND EFFECTS", save.sfxOn, 582, () => { save.sfxOn = !save.sfxOn; }, Reopen);
-        PauseToggle("VIBRATION", save.hapticsOn, 642, () => { save.hapticsOn = !save.hapticsOn; }, Reopen);
+        // Five toggles now (audio x3 + controls x2), so the card is sized from the row count rather
+        // than from two hand-tuned constants that had to be edited every time a row was added.
+        const int rowTop = 452, rowStep = 56;
+        const int rows = 5;
+        // Everything below the rows is positioned from the same running y, so adding a sixth toggle
+        // later moves the buttons and resizes the card automatically instead of silently overlapping
+        // them the way two hand-tuned constants did.
+        int lastRowEnd = rowTop + 40 + rows * rowStep;          // 492 + 5*56 = 772
+        int privacyY = lastRowEnd + 4;
+        int doneY2 = privacy ? privacyY + 62 : privacyY;
+        int creditY = doneY2 + 78;
+        AddCard(px, 420, pw, creditY - 420 + 30, gold, "settings");
+        AddText("SETTINGS", 360, 452, 30, gold, FontStyle.Bold);
+        int y = rowTop + 40;
+        PauseToggle("MUSIC", save.musicOn, y, () => { save.musicOn = !save.musicOn; }, Reopen); y += rowStep;
+        PauseToggle("SOUND EFFECTS", save.sfxOn, y, () => { save.sfxOn = !save.sfxOn; }, Reopen); y += rowStep;
+        PauseToggle("VIBRATION", save.hapticsOn, y, () => { save.hapticsOn = !save.hapticsOn; }, Reopen); y += rowStep;
+        // Turning the pads off is only safe because tap-to-walk, hold-to-keep-walking and
+        // hold-on-a-station-to-work-it all exist; see UpdatePlay. TouchBand also drops to 0 so the
+        // strip the pads used to reserve becomes tappable world again.
+        PauseToggle("ON-SCREEN BUTTONS", save.touchButtons, y,
+            () => { save.touchButtons = !save.touchButtons; }, Reopen); y += rowStep;
+        PauseToggle("CAMERA FOLLOWS CHEF", save.cameraFollow, y,
+            () => { save.cameraFollow = !save.cameraFollow; camFollowPos = playerPos; }, Reopen); y += rowStep;
         // GDPR requires the consent choice to stay changeable after the first run, and the privacy
         // policy promises this exact entry. Google's UMP owns the form; we only re-open it.
         if (privacy)
-            AddIconButton("PRIVACY OPTIONS", "ic_open", px + 22, 702, pw - 44, 52, gold,
+            AddIconButton("PRIVACY OPTIONS", "ic_open", px + 22, privacyY, pw - 44, 52, gold,
                 () => RushhouseConsent.ShowPrivacyOptions(Reopen), "set-privacy");
-        int doneY = privacy ? 764 : 704;
-        AddIconButton("DONE", "ic_open", px + 22, doneY, pw - 44, 52, mint, ShowMenu, "set-done");
+        AddIconButton("DONE", "ic_open", px + 22, doneY2, pw - 44, 52, mint, ShowMenu, "set-done");
         // Required attribution: the soundtrack is Stable Audio 3 output under the Stability AI
         // Community License, which obliges this exact string wherever the game is distributed.
         // It also lives in NOTICE and the README; this is the copy a player can actually see.
-        AddText("Music powered by Stability AI", 360, privacy ? 844 : 784, 10, muted, FontStyle.Normal);
+        AddText("Music powered by Stability AI", 360, creditY, 10, muted, FontStyle.Normal);
     }
 
     // one settings row: name on the left, an ON/OFF pill on the right, whole row tappable
@@ -1265,16 +1303,20 @@ public class RushhouseUnityGame : MonoBehaviour
         touchRoot.transform.SetParent(uiRoot, false);
         var trt = touchRoot.GetComponent<RectTransform>();
         trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one; trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
-        joyBaseGo = MakeTouchImage("joy-base", new Color(1, 1, 1, .12f), 44, 926, 190, 190);
-        joyKnobGo = MakeTouchImage("joy-knob", new Color(1, 1, 1, .34f), 109, 991, 60, 60);
+        // Both pads sit at the BOTTOM of the frame (y is measured from the top; H is 1280, the pads
+        // are 190/180 tall, so ~1050 leaves a 40px margin clear of the home indicator). They used to
+        // float around 72% down, which put them right over the kitchen you were trying to watch.
+        joyBaseGo = MakeTouchImage("joy-base", new Color(1, 1, 1, .12f), 44, 1050, 190, 190);
+        joyKnobGo = MakeTouchImage("joy-knob", new Color(1, 1, 1, .34f), 109, 1115, 60, 60);
         joyBaseCenter = joyKnobGo.GetComponent<RectTransform>().anchoredPosition;
-        actBtnGo = MakeTouchImage("act-btn", new Color(gold.r, gold.g, gold.b, .24f), 486, 936, 180, 180);
+        actBtnGo = MakeTouchImage("act-btn", new Color(gold.r, gold.g, gold.b, .24f), 486, 1060, 180, 180);
         var label = new GameObject("act-label", typeof(Text));
         label.transform.SetParent(touchRoot.transform, false);
         var lt = label.GetComponent<Text>();
         lt.font = uiFont; lt.text = "ACT"; lt.fontSize = 30; lt.fontStyle = FontStyle.Bold;
         lt.alignment = TextAnchor.MiddleCenter; lt.color = new Color(1, 1, 1, .82f); lt.raycastTarget = false;
-        Place(label.GetComponent<RectTransform>(), 486, 1006, 180, 40);
+        Place(label.GetComponent<RectTransform>(), 486, 1130, 180, 40);
+        actLabelGo = label;
         // zoom +/- buttons (persistent so their onClick survives the per-tick UI rebuild), right edge
         MakeZoomButton("zoom-in", "+", 636, 300, () => SetZoom(camZoom + .18f));
         MakeZoomButton("zoom-out", "-", 636, 366, () => SetZoom(camZoom - .18f));
@@ -1314,6 +1356,13 @@ public class RushhouseUnityGame : MonoBehaviour
         if (!touchRoot) return;
         bool play = screen == ScreenMode.Play;
         if (touchRoot.activeSelf != play) touchRoot.SetActive(play);
+        // The stick and ACT are optional (Settings). The zoom buttons share this root and must stay,
+        // so hide the pads individually rather than the whole root.
+        bool pads = save == null || save.touchButtons;
+        if (joyBaseGo && joyBaseGo.activeSelf != pads) joyBaseGo.SetActive(pads);
+        if (joyKnobGo && joyKnobGo.activeSelf != pads) joyKnobGo.SetActive(pads);
+        if (actBtnGo && actBtnGo.activeSelf != pads) actBtnGo.SetActive(pads);
+        if (actLabelGo && actLabelGo.activeSelf != pads) actLabelGo.SetActive(pads);
         if (!play) { joyMove = Vector2.zero; joyFinger = -1; actHeld = false; return; }
         if (paused) { joyMove = Vector2.zero; joyFinger = -1; actHeld = false; return; }   // pause overlay swallows gameplay taps
 
@@ -2990,7 +3039,7 @@ public class RushhouseUnityGame : MonoBehaviour
             playerObj.transform.rotation = BillboardRotation();
         }
         if (Input.GetKeyDown(KeyCode.Space)) InteractNearest();
-        HandleHold(dt, actHeld || Input.GetKey(KeyCode.Space) || holdPressed);
+        HandleHold(dt, actHeld || Input.GetKey(KeyCode.Space) || holdPressed || pointerHoldAct);
         if (Input.GetMouseButtonDown(0) && !PointerOverUI() && Input.mousePosition.y > Screen.height * TouchBand) {
             Vector2 p = ScreenToGamePoint(Input.mousePosition);
             Appliance a = ApplianceAtScreen(Input.mousePosition);   // pick the prop you actually clicked
@@ -3011,6 +3060,31 @@ public class RushhouseUnityGame : MonoBehaviour
                 }
             }
         }
+        // HOLD TO KEEP WALKING. A tap sets one destination; holding steers continuously toward the
+        // finger, which is what makes the game fully playable with the on-screen pads switched off.
+        // Holding ON a station already within reach works it instead (chop, wash) — otherwise there
+        // would be no way to run a hold action without the ACT pad.
+        bool pointerDown = Input.GetMouseButton(0) && !PointerOverUI()
+                           && Input.mousePosition.y > Screen.height * TouchBand;
+        pointerHoldAct = false;
+        if (pointerDown) {
+            pointerHold += dt;
+            if (pointerHold > .18f) {                       // .18s so a quick tap stays a tap
+                Appliance under = ApplianceAtScreen(Input.mousePosition);
+                if (under != null && DistanceToAppliance(playerPos, under) < InteractionRange(under)) {
+                    pointerHoldAct = true;
+                    hasMoveTarget = false;
+                } else {
+                    Vector2 wp = ScreenToGamePoint(Input.mousePosition);
+                    if (WorldInsideGrid(wp)) {
+                        moveTarget = IsWalkablePosition(wp, .16f) ? wp : SafeOpenPosition(wp, .16f);
+                        tapAction = under;                  // held over a distant station: go and use it
+                        hasMoveTarget = true;
+                    }
+                }
+            }
+        } else pointerHold = 0f;
+
         // NOTE: no hover-info during play — it popped cards constantly while you were cooking. The
         // hover preview lives on the FLOORPLAN screen only; in play you TAP a station to read it.
         if (infoTimer > 0) infoTimer -= dt;
