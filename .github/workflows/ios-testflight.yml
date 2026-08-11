@@ -151,45 +151,21 @@ jobs:
         working-directory: ${{ runner.temp }}/ios/iOS
         run: xcodebuild -list -workspace Unity-iPhone.xcworkspace
 
-      # ARCHIVE SIGNED. The previous shape archived with CODE_SIGNING_ALLOWED=NO and left all
-      # signing to -exportArchive, which got as far as a signed .ipa and was then rejected at upload:
+      # ARCHIVE UNSIGNED, SIGN AT EXPORT, THEN FIX THE FRAMEWORKS EXPORT DOES NOT TOUCH.
       #
-      #   90035 Invalid Signature ... "Rushhouse.app/Frameworks/unity-plugin-library.framework/
-      #   unity-plugin-library" is not properly signed
+      # Archiving WITH signing was tried in run 3 and cannot work for this account:
       #
-      # exportArchive re-signs the app and the frameworks Xcode BUILT, but unity-plugin-library is a
-      # prebuilt binary framework that ships inside the Google Mobile Ads Unity plugin and is only
-      # COPIED into the bundle. With signing disabled during archive, nothing ever signs it, and the
-      # gap is invisible until Apple's server rejects the upload a minute in.
+      #   Communication with Apple failed: Your team has no devices from which to generate a
+      #   provisioning profile.
+      #   No profiles for 'com.rldgames.rushhouse' were found: Xcode couldn't find any iOS App
+      #   Development provisioning profiles matching 'com.rldgames.rushhouse'.
       #
-      # Signing during archive fixes it at the source: the embed phase signs nested frameworks with
-      # the same identity as the app. This does need a distribution certificate in the keychain,
-      # which is why the unsigned shape existed — but -allowProvisioningUpdates with the ASC API key
-      # creates and installs one, and the export step already proved this key can do exactly that.
-      # (A distribution profile needs no registered devices; only DEVELOPMENT profiles do, which is
-      # what "your team has no devices from which to generate a provisioning profile" really means.)
-      - name: Archive (signed)
-        if: steps.keys.outputs.signed == 'true'
-        working-directory: ${{ runner.temp }}/ios/iOS
-        run: |
-          xcodebuild \
-            -workspace Unity-iPhone.xcworkspace \
-            -scheme Unity-iPhone \
-            -configuration Release \
-            -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/Rushhouse.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
-            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
-            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
-            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
-            CODE_SIGN_STYLE=Automatic \
-            archive
-
-      # Fork-friendly path: with no secrets there is no certificate to sign with, so still produce
-      # an archive worth inspecting rather than failing the run.
-      - name: Archive (unsigned, no secrets configured)
-        if: steps.keys.outputs.signed != 'true'
+      # That is Apple's intended flow showing its edge: `archive` with automatic signing builds with
+      # a DEVELOPMENT identity, and development profiles are generated from registered devices. With
+      # no Mac and no device there is nothing to register, so the archive can only be unsigned and
+      # all real signing has to happen afterwards. -allowProvisioningUpdates does not help here —
+      # it is only ever asked for a distribution profile at EXPORT, which needs no devices.
+      - name: Archive (unsigned)
         working-directory: ${{ runner.temp }}/ios/iOS
         run: |
           xcodebuild \
@@ -265,6 +241,57 @@ jobs:
             -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}
           ls -l "$RUNNER_TEMP/export"
+
+      # exportArchive RE-signs nested code that is already signed; it does not sign code that arrived
+      # bare. Everything Xcode builds is signed by the time it is embedded, so the only casualties
+      # are vendored binary frameworks that the build merely copies — here
+      # unity-plugin-library.framework, shipped prebuilt inside the Google Mobile Ads Unity plugin.
+      # Because the archive has to be unsigned (see the archive step), that framework reaches the
+      # .ipa with no signature at all and Apple rejects the upload with 90035.
+      #
+      # This is the first point where the fix is even possible: -allowProvisioningUpdates fetched
+      # and installed the distribution certificate during export, so the identity exists in the
+      # keychain now and did not a step ago.
+      - name: Sign the frameworks export left bare
+        if: steps.keys.outputs.signed == 'true'
+        working-directory: ${{ runner.temp }}
+        run: |
+          IPA=$(ls export/*.ipa | head -1)
+          rm -rf resign && mkdir resign
+          unzip -q "$IPA" -d resign
+          APP=$(ls -d resign/Payload/*.app | head -1)
+
+          IDENTITY=$(security find-identity -v -p codesigning \
+            | sed -n 's/.*"\(Apple Distribution:[^"]*\)".*/\1/p' | head -1)
+          if [ -z "$IDENTITY" ]; then
+            echo "identities available:"; security find-identity -v -p codesigning
+            echo "::error::no Apple Distribution identity in the keychain — export should have installed one"
+            exit 1
+          fi
+          echo "signing with: $IDENTITY"
+
+          # The app's signature seals its nested code, so this must go inside-out: signing a
+          # framework after the app would invalidate the app again.
+          for fw in "$APP"/Frameworks/*; do
+            [ -e "$fw" ] || continue
+            echo "  re-signing $(basename "$fw")"
+            codesign --force --sign "$IDENTITY" "$fw"
+          done
+
+          # Preserve the entitlements the export already granted. Re-signing without them silently
+          # drops every capability the provisioning profile authorises, which fails later and
+          # elsewhere.
+          if codesign -d --entitlements ent.plist --xml "$APP" 2>/dev/null && [ -s ent.plist ]; then
+            echo "  re-signing the app with its existing entitlements"
+            codesign --force --sign "$IDENTITY" --entitlements ent.plist "$APP"
+          else
+            echo "::error::could not read entitlements off the exported app; refusing to re-sign without them"
+            exit 1
+          fi
+
+          rm -f "$IPA"
+          ( cd resign && zip -qry "../$IPA" Payload )
+          ls -l "$IPA"
 
       # Apple rejected an .ipa that xcodebuild had just reported exporting successfully, because one
       # nested framework was unsigned. That answer cost a full archive plus a minute of uploading,
