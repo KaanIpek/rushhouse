@@ -127,7 +127,14 @@ jobs:
         run: |
           test -f Podfile || { echo "::error::no Podfile — the Unity build did not run EDM4U"; exit 1; }
           cat Podfile
-          pod install --repo-update
+          # --repo-update clones the whole legacy spec repo and cost 12 of the first run's 19
+          # minutes. These pods resolve through the CDN trunk source, which needs no local repo at
+          # all, so try the fast path first and only pay for the slow one if resolution actually
+          # fails — which is the single case --repo-update exists to fix.
+          pod install || {
+            echo "plain pod install failed; retrying with --repo-update"
+            pod install --repo-update
+          }
           ls -d Unity-iPhone.xcworkspace
 
       - name: Stage the App Store Connect key
@@ -144,13 +151,45 @@ jobs:
         working-directory: ${{ runner.temp }}/ios/iOS
         run: xcodebuild -list -workspace Unity-iPhone.xcworkspace
 
-      # ARCHIVE UNSIGNED, SIGN AT EXPORT. Signing the archive needs a certificate in a keychain;
-      # signing at export lets -allowProvisioningUpdates ask Apple for exactly one distribution
-      # profile using the API key. This is the shape that works with no Mac and no registered
-      # devices — "your team has no devices from which to generate a provisioning profile" means
-      # Xcode was asked for a DEVELOPMENT profile, which is built from devices; distribution
-      # profiles need none.
-      - name: Archive (unsigned)
+      # ARCHIVE SIGNED. The previous shape archived with CODE_SIGNING_ALLOWED=NO and left all
+      # signing to -exportArchive, which got as far as a signed .ipa and was then rejected at upload:
+      #
+      #   90035 Invalid Signature ... "Rushhouse.app/Frameworks/unity-plugin-library.framework/
+      #   unity-plugin-library" is not properly signed
+      #
+      # exportArchive re-signs the app and the frameworks Xcode BUILT, but unity-plugin-library is a
+      # prebuilt binary framework that ships inside the Google Mobile Ads Unity plugin and is only
+      # COPIED into the bundle. With signing disabled during archive, nothing ever signs it, and the
+      # gap is invisible until Apple's server rejects the upload a minute in.
+      #
+      # Signing during archive fixes it at the source: the embed phase signs nested frameworks with
+      # the same identity as the app. This does need a distribution certificate in the keychain,
+      # which is why the unsigned shape existed — but -allowProvisioningUpdates with the ASC API key
+      # creates and installs one, and the export step already proved this key can do exactly that.
+      # (A distribution profile needs no registered devices; only DEVELOPMENT profiles do, which is
+      # what "your team has no devices from which to generate a provisioning profile" really means.)
+      - name: Archive (signed)
+        if: steps.keys.outputs.signed == 'true'
+        working-directory: ${{ runner.temp }}/ios/iOS
+        run: |
+          xcodebuild \
+            -workspace Unity-iPhone.xcworkspace \
+            -scheme Unity-iPhone \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/Rushhouse.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${{ secrets.ASC_KEY_ID }}.p8 \
+            -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
+            -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }} \
+            DEVELOPMENT_TEAM=${{ secrets.APPLE_TEAM_ID }} \
+            CODE_SIGN_STYLE=Automatic \
+            archive
+
+      # Fork-friendly path: with no secrets there is no certificate to sign with, so still produce
+      # an archive worth inspecting rather than failing the run.
+      - name: Archive (unsigned, no secrets configured)
+        if: steps.keys.outputs.signed != 'true'
         working-directory: ${{ runner.temp }}/ios/iOS
         run: |
           xcodebuild \
@@ -226,6 +265,34 @@ jobs:
             -authenticationKeyID ${{ secrets.ASC_KEY_ID }} \
             -authenticationKeyIssuerID ${{ secrets.ASC_ISSUER_ID }}
           ls -l "$RUNNER_TEMP/export"
+
+      # Apple rejected an .ipa that xcodebuild had just reported exporting successfully, because one
+      # nested framework was unsigned. That answer cost a full archive plus a minute of uploading,
+      # and arrived as a 90035 from a server rather than from the tool that built the thing. The
+      # same verdict is available locally in seconds: --deep walks every nested bundle, and
+      # --strict refuses to pass a signature it merely tolerates.
+      - name: Verify every nested signature before uploading
+        if: steps.keys.outputs.signed == 'true'
+        run: |
+          cd "$RUNNER_TEMP" && rm -rf sigcheck && mkdir sigcheck
+          unzip -q export/*.ipa -d sigcheck
+          APP=$(ls -d sigcheck/Payload/*.app | head -1)
+          echo "--- embedded frameworks ---"
+          ls "$APP/Frameworks" 2>/dev/null || echo "(none)"
+          # Report every framework individually: "the app is signed" is exactly the claim that was
+          # true last run and still failed, so name the file if one of them is bare.
+          fail=0
+          for fw in "$APP"/Frameworks/*; do
+            [ -e "$fw" ] || continue
+            printf '%-52s ' "$(basename "$fw")"
+            codesign -v --strict "$fw" 2>&1 && echo "OK" || { echo "UNSIGNED/INVALID"; fail=1; }
+          done
+          echo "--- whole app, deep ---"
+          codesign -vvv --deep --strict "$APP" 2>&1 || fail=1
+          echo "--- signing identity actually used ---"
+          codesign -dvv "$APP" 2>&1 | grep -iE "Authority|TeamIdentifier" || true
+          [ "$fail" = "0" ] \
+            || { echo "::error::A nested bundle is unsigned or invalidly signed — Apple rejects this with 90035, see the per-framework list above"; exit 1; }
 
       - name: Upload to TestFlight
         if: steps.keys.outputs.signed == 'true'
