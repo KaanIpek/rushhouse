@@ -631,17 +631,26 @@ public class RushhouseUnityGame : MonoBehaviour
         void Reopen() { ShowMenu(); DrawSettingsOverlay(); }
         AddPanel(0, 0, W, H, new Color(.02f, .03f, .05f, .88f), uiRoot, "set-veil");
         const int px = 56, pw = 608;
-        AddCard(px, 420, pw, 392, gold, "settings");
+        // The consent row only exists for players a CMP applies to (EEA/UK/Switzerland), so the
+        // card grows for them rather than leaving a gap for everyone else.
+        bool privacy = RushhouseConsent.PrivacyOptionsRequired;
+        AddCard(px, 420, pw, privacy ? 452 : 392, gold, "settings");
         AddText("AUDIO", 360, 472, 30, gold, FontStyle.Bold);
         AddText("Applies to every shift", 360, 500, 11, muted, FontStyle.Bold);
         PauseToggle("MUSIC", save.musicOn, 522, () => { save.musicOn = !save.musicOn; }, Reopen);
         PauseToggle("SOUND EFFECTS", save.sfxOn, 582, () => { save.sfxOn = !save.sfxOn; }, Reopen);
         PauseToggle("VIBRATION", save.hapticsOn, 642, () => { save.hapticsOn = !save.hapticsOn; }, Reopen);
-        AddIconButton("DONE", "ic_open", px + 22, 704, pw - 44, 52, mint, ShowMenu, "set-done");
+        // GDPR requires the consent choice to stay changeable after the first run, and the privacy
+        // policy promises this exact entry. Google's UMP owns the form; we only re-open it.
+        if (privacy)
+            AddIconButton("PRIVACY OPTIONS", "ic_open", px + 22, 702, pw - 44, 52, gold,
+                () => RushhouseConsent.ShowPrivacyOptions(Reopen), "set-privacy");
+        int doneY = privacy ? 764 : 704;
+        AddIconButton("DONE", "ic_open", px + 22, doneY, pw - 44, 52, mint, ShowMenu, "set-done");
         // Required attribution: the soundtrack is Stable Audio 3 output under the Stability AI
         // Community License, which obliges this exact string wherever the game is distributed.
         // It also lives in NOTICE and the README; this is the copy a player can actually see.
-        AddText("Music powered by Stability AI", 360, 784, 10, muted, FontStyle.Normal);
+        AddText("Music powered by Stability AI", 360, privacy ? 844 : 784, 10, muted, FontStyle.Normal);
     }
 
     // one settings row: name on the left, an ON/OFF pill on the right, whole row tappable
