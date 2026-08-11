@@ -76,3 +76,10 @@ google-services.json
 GoogleService-Info.plist
 secrets.json
 **/ServiceAccount*.json
+
+# The Xcode project tarball handed to CI via a GitHub Release. ~256 MB, which is
+# over GitHub's 100 MB per-file limit, so committing it does not fail quietly --
+# it fails the whole push. It is a build output; it belongs on a Release, not here.
+xcode-project.tar.gz
+# Batch-mode Unity logs written next to the project by the build commands.
+unity_*.log
