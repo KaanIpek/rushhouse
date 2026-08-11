@@ -78,6 +78,21 @@ jobs:
           find "$RUNNER_TEMP/ios/iOS" -name '*.sh' -exec chmod +x {} \;
           ls -l "$RUNNER_TEMP/ios/iOS/MapFileParser.sh" 2>/dev/null || true
 
+      # RushhouseIOSPostProcess writes CFBundleIconName from Unity, but a Release tarball generated
+      # BEFORE that fix has a source plist without it, and regenerating one costs a 256 MB upload to
+      # change a single key. So assert it here too. This is idempotent and a no-op on tarballs that
+      # already carry the key, which is why it is unconditional rather than tag-dependent — a step
+      # that only runs for old tags is a step nobody remembers is there.
+      - name: Ensure CFBundleIconName in the source Info.plist
+        run: |
+          PLIST="$RUNNER_TEMP/ios/iOS/Info.plist"
+          if /usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "$PLIST" >/dev/null 2>&1; then
+            echo "already present: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$PLIST")"
+          else
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "$PLIST"
+            echo "added CFBundleIconName = AppIcon"
+          fi
+
       # The runner ships several Xcodes and its default is not always the newest. Apple has
       # required the iOS 26 SDK since 2026-04-28 and CHECKS IT AT UPLOAD — archive and export both
       # succeed, then App Store Connect returns a 409 about the SDK. Print the SDK so the log
