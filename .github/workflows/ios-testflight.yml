@@ -41,9 +41,13 @@ name: ios-testflight
 on:
   workflow_dispatch:
     inputs:
+      payload_branch:
+        description: 'Branch holding ci-payload/xcode.part* (leave blank to use a Release asset)'
+        required: false
+        default: 'xcode-payload'
       xcode_release_tag:
-        description: 'Release tag holding xcode-project.tar.gz'
-        required: true
+        description: 'Release tag holding xcode-project.tar.gz (used only when payload_branch is blank)'
+        required: false
         default: 'xcode-1'
       release_notes:
         description: 'What testers see in TestFlight'
@@ -61,12 +65,31 @@ jobs:
       # arrives from a Release asset and everything else happens under $RUNNER_TEMP. Cloning a
       # 328 MB Unity repo to use none of it cost 4m14s of run 4. `gh release download` authenticates
       # with github.token and needs no working copy.
+      # TWO WAYS IN. A Release asset is the tidy one, but attaching a 256 MB file to a Release can
+      # only be done by a human dragging it into the browser: the upload tool available here caps at
+      # 10 MB, and GitHub's CSP (connect-src is a strict allowlist) forbids the release page from
+      # fetching those bytes from a local server instead. So the payload can be committed to a
+      # throwaway branch in chunks small enough to push, and reassembled here. Same bytes either way
+      # -- the md5 recorded beside the parts IS checked, because a truncated chunk would otherwise
+      # surface much later as an incomprehensible tar or compiler error.
       - name: Fetch the prebuilt Xcode project
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download "${{ inputs.xcode_release_tag }}" \
-            --repo "$GITHUB_REPOSITORY" --pattern 'xcode-project.tar.gz' --dir "$RUNNER_TEMP"
+          set -e
+          if [ -n "${{ inputs.payload_branch }}" ]; then
+            git clone --depth 1 --branch "${{ inputs.payload_branch }}" --single-branch \
+              "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY.git" "$RUNNER_TEMP/payload"
+            ls -l "$RUNNER_TEMP/payload/ci-payload"
+            cat "$RUNNER_TEMP/payload"/ci-payload/xcode.part* > "$RUNNER_TEMP/xcode-project.tar.gz"
+            want=$(cat "$RUNNER_TEMP/payload/ci-payload/xcode.md5")
+            got=$(md5 -q "$RUNNER_TEMP/xcode-project.tar.gz")
+            echo "md5 want=$want got=$got"
+            [ "$want" = "$got" ] || { echo "::error::reassembled payload md5 mismatch"; exit 1; }
+          else
+            gh release download "${{ inputs.xcode_release_tag }}" \
+              --repo "$GITHUB_REPOSITORY" --pattern 'xcode-project.tar.gz' --dir "$RUNNER_TEMP"
+          fi
           mkdir -p "$RUNNER_TEMP/ios"
           tar -xzf "$RUNNER_TEMP/xcode-project.tar.gz" -C "$RUNNER_TEMP/ios"
           ls "$RUNNER_TEMP/ios/iOS" | head
