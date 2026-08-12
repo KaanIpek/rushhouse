@@ -1032,34 +1032,40 @@ public class RushhouseUnityGame : MonoBehaviour
     void DrawWardrobe()
     {
         ClearUI();
-        AddPanel(0, 0, W, H, new Color(.03f, .035f, .05f, 1), uiRoot, "wr-bg");
-        AddText("WARDROBE", 360, 78, 38, gold, FontStyle.Bold);
-        AddText("Buy once - wear on the chef or any staff member", 360, 112, 11, muted, FontStyle.Bold);
+        const int M = 32, CW = W - M * 2;
+        AddPanel(0, 0, W, H, RushhouseUIKit.Bg, uiRoot, "wr-bg");
+        Surface(M, 40, CW, 88, RushhouseUIKit.Surface, 20, true, "wr-head");
+        AddText("WARDROBE", M + 20, 72, 24, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "wr-title");
+        AddText("Buy once, wear on the chef or any staff", M + 20, 100, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "wr-sub");
+        AddText(save.tokens.ToString(), W - M - 24, 72, 24, violet, FontStyle.Bold, TextAnchor.MiddleRight, "wr-tok");
+        AddText("TOKENS", W - M - 24, 98, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "wr-toklab");
 
-        // token balance + how to get more, stated plainly so the currency is never a mystery
-        AddCard(56, 140, 608, 96, gold, "wr-bank");
-        AddText(save.tokens.ToString(), 118, 178, 34, gold, FontStyle.Bold);
-        AddText("TOKENS", 118, 208, 10, muted, FontStyle.Bold);
         int left = AdsLeftToday();
         if (left > 0)
-            AddAdButton("WATCH AD  +1  (" + left + " left today)", 196, 158, 448, 62, "token", DrawWardrobe, "wr-earn");
+            AddAdButton("WATCH AD   +1 TOKEN   (" + left + " left today)", M, 144, CW, 64, "token", DrawWardrobe, "wr-earn");
         else {
-            AddChip(196, 158, 448, 62, muted, "wr-earn-done", .06f);
-            AddText("Daily bonus used - 3-star days also pay tokens", 420, 189, 11, muted, FontStyle.Bold);
+            Surface(M, 144, CW, 64, RushhouseUIKit.Surface, 20, false, "wr-earn-done");
+            AddText("Daily bonus used - 3-star days also pay tokens", W / 2, 176, 11, RushhouseUIKit.Muted,
+                    FontStyle.Bold, TextAnchor.MiddleCenter, "wr-earn-done-l");
         }
 
         // Role tabs: outfits are bought once and can be worn by the chef OR any hired staff,
         // because every outfit is rendered from one of the four models the game already uses.
         string[] roles = { "player", "waiter", "cook", "prepper" };
+        Surface(M, 224, CW, 60, RushhouseUIKit.Surface, 18, false, "wr-tabtrack");
+        int segW = (CW - 12) / 4;
         for (int r = 0; r < roles.Length; r++) {
             string role = roles[r];
             bool on = wardrobeRole == role;
             bool hired = role == "player" || StaffCount(role) > 0;
-            int tx = 40 + r * 161, tw2 = 149;
-            AddHitArea(tx, 246, tw2, 52, () => { wardrobeRole = role; DrawWardrobe(); }, "wr-tab" + r);
-            AddChip(tx, 246, tw2, 52, on ? gold : muted, "wr-tabbg" + r, on ? .18f : .05f);
-            AddText(RoleLabel(role), tx + tw2 / 2, 268, 13, on ? gold : hired ? text : muted, FontStyle.Bold);
-            if (!hired) AddText("not hired", tx + tw2 / 2, 286, 8, muted, FontStyle.Bold);
+            int tx = M + 6 + r * segW;
+            if (on) Surface(tx, 230, segW, 48, violet, 14, false, "wr-tabon");
+            AddHitArea(tx, 230, segW, 48, () => { wardrobeRole = role; DrawWardrobe(); }, "wr-tab" + r);
+            AddText(RoleLabel(role), tx + segW / 2, hired ? 254 : 248, 13,
+                    on ? Color.white : hired ? RushhouseUIKit.Ink : RushhouseUIKit.Muted, FontStyle.Bold,
+                    TextAnchor.MiddleCenter, "wr-tablab" + r);
+            if (!hired) AddText("not hired", tx + segW / 2, 268, 8, RushhouseUIKit.Muted, FontStyle.Bold,
+                                TextAnchor.MiddleCenter, "wr-tabhire" + r);
         }
 
         // Two columns: ten outfits down a single column overran the screen and hid the last two
@@ -1085,15 +1091,19 @@ public class RushhouseUnityGame : MonoBehaviour
             int idx = i;
             if (rendered && (owned || affordable))
                 AddHitArea(x, y, cardW, cardH, () => TapOutfit(idx), "wr-hit" + i);
-            AddCard(x, y, cardW, cardH, accent, "wr" + i, .94f);
+            Surface(x, y, cardW, cardH, rendered ? RushhouseUIKit.SurfaceHi : new Color(.11f, .13f, .16f),
+                    20, rendered, "wr" + i);
+            // Equipped is the one state worth a ring: it answers "which am I wearing" at a glance
+            // without giving every other card a border too.
+            if (equipped) Surface(x + 6, y + cardH - 8, cardW - 12, 4, RushhouseUIKit.Teal, 2, false, "wr-eq" + i);
 
             // the outfit wearing itself: the actual idle frame, so the card cannot lie about it
-            AddPanel(x + 10, y + 12, 80, 100, new Color(1, 1, 1, .05f), uiRoot, "wr-thumb" + i);
+            Surface(x + 10, y + 12, 80, 100, new Color(accent.r, accent.g, accent.b, .12f), 16, false, "wr-thumb" + i);
             if (rendered && animatedCharacterSprites.TryGetValue(previewId + "_front_idle_0", out var sp) && sp)
                 AddUIImage("wr-prev" + i, sp, x + 12, y + 8, 76, 108, Color.white);
 
-            AddText(o.label, x + 100, y + 34, 16, rendered ? text : muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-            AddText(o.blurb, x + 100, y + 58, 9, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
+            AddText(o.label, x + 100, y + 34, 16, rendered ? RushhouseUIKit.Ink : RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft);
+            AddText(o.blurb, x + 100, y + 58, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft);
 
             string state = !rendered ? "COMING SOON" : equipped ? "EQUIPPED" : owned ? "TAP TO WEAR"
                 : affordable ? "TAP TO BUY" : "NEED " + (o.price - save.tokens) + " MORE";
@@ -1109,7 +1119,9 @@ public class RushhouseUnityGame : MonoBehaviour
             }
         }
         int rows = (outfitCatalogue.Count + 1) / 2;
-        AddIconButton("BACK", "ic_back", px, top + rows * (cardH + rowGap) + 14, cardW * 2 + gap, 74, mint, ShowMenu, "wr-back");
+        SolidButton("BACK", px, top + rows * (cardH + rowGap) + 14, cardW * 2 + gap, 74,
+                    RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, ShowMenu, "wr-back", 18);
+        AnimateUIIn("wardrobe");
     }
 
     // One tap does the obvious thing: buy it if you can, otherwise wear it.
@@ -1784,24 +1796,39 @@ public class RushhouseUnityGame : MonoBehaviour
         ClearStaticWorld();
         TrimPropPool();
         ClearUI();
-        AddPanel(0, 0, W, H, new Color(.03f, .035f, .05f, 1), uiRoot, "recipes-bg");
-        AddText("RECIPES", 360, 82, 40, gold, FontStyle.Bold);
-        AddText(save.theme.ToUpperInvariant() + " KITCHEN", 360, 122, 13, mint, FontStyle.Bold);
+        const int M = 32, CW = W - M * 2;
+        AddPanel(0, 0, W, H, RushhouseUIKit.Bg, uiRoot, "recipes-bg");
+        Surface(M, 40, CW, 88, RushhouseUIKit.Surface, 20, true, "rec-head");
+        AddText("RECIPES", M + 20, 72, 24, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "rec-title");
+        AddText(save.theme.ToUpperInvariant() + " KITCHEN", M + 20, 100, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "rec-sub");
         var list = recipes.Where(r => r.theme == save.theme).OrderBy(r => r.day).ToList();
-        // fill the screen: size rows to the count so the whole card list spans the page, no dead half
-        int top = 158, bottom = 1150, rowH = Mathf.Clamp((bottom - top) / Mathf.Max(1, list.Count), 60, 96);
+        int unlocked = list.Count(r => r.day <= save.day);
+        AddText(unlocked + "/" + list.Count, W - M - 24, 78, 22, RushhouseUIKit.Teal, FontStyle.Bold, TextAnchor.MiddleRight, "rec-count");
+
+        // Rows sized to the count so the list always fills the page instead of leaving a dead half.
+        int top = 152, bottom = 1150;
+        int rowH = Mathf.Clamp((bottom - top) / Mathf.Max(1, list.Count), 76, 104);
         int y = top;
         foreach (var r in list) {
             bool locked = r.day > save.day;
-            Color card = locked ? new Color(.05f, .06f, .08f, 1) : new Color(.09f, .11f, .15f, 1);
-            AddPanel(70, y, 580, rowH - 10, card, uiRoot, "recipe");
-            AddText(r.label, 116, y + 16, 16, locked ? muted : text, FontStyle.Bold, TextAnchor.MiddleLeft);
-            AddText(string.Join(" + ", r.parts).ToUpperInvariant(), 116, y + 38, 11, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-            AddText(locked ? "DAY " + r.day : "+" + r.value, 596, y + 16, 12, locked ? red : gold, FontStyle.Bold, TextAnchor.MiddleRight);
-            AddUIImage("recipe-dish-" + r.id, FinalDishSprite(r.id), 590, y + (rowH - 10) / 2 - 20, 44, 44, locked ? new Color(.5f, .5f, .5f, .8f) : Color.white, true);
+            Surface(M, y, CW, rowH - 12, locked ? new Color(.11f, .13f, .16f) : RushhouseUIKit.SurfaceHi,
+                    18, !locked, "recipe");
+            Surface(M + 14, y + 12, rowH - 36, rowH - 36, new Color(1, 1, 1, .05f), 16, false, "recipe-thumb-bg");
+            AddUIImage("recipe-dish-" + r.id, FinalDishSprite(r.id), M + 20, y + 18, rowH - 48, rowH - 48,
+                       locked ? new Color(.5f, .5f, .5f, .7f) : Color.white, true);
+            AddText(r.label, M + rowH - 6, y + 30, 17, locked ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
+                    FontStyle.Bold, TextAnchor.MiddleLeft, "recipe-l");
+            AddText(string.Join("  +  ", r.parts).ToUpperInvariant(), M + rowH - 6, y + 54, 11,
+                    RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "recipe-p");
+            // Locked rows say WHEN, not just "no": a date is a reason to come back.
+            Color pc = locked ? RushhouseUIKit.Muted : RushhouseUIKit.Gold;
+            Surface(M + CW - 96, y + 20, 80, 28, new Color(pc.r, pc.g, pc.b, .16f), 14, false, "recipe-tag-bg");
+            AddText(locked ? "DAY " + r.day : "+" + r.value, M + CW - 56, y + 34, 13, pc, FontStyle.Bold,
+                    TextAnchor.MiddleCenter, "recipe-tag");
             y += rowH;
         }
-        AddButton("BACK", 92, 1176, 536, 66, blue, ShowMenu);
+        SolidButton("BACK", 32, 1176, W - 64, 72, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, ShowMenu, "rec-back", 18);
+        AnimateUIIn("recipes");
     }
 
     void BuildPlayUI()
