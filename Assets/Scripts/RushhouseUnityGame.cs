@@ -1432,77 +1432,112 @@ public class RushhouseUnityGame : MonoBehaviour
         ClearStaticWorld();
         TrimPropPool();
         ClearUI();
-        // REBUILT FROM SCRATCH, then put on a system. No frame artwork anywhere.
+        // A FRONT DOOR, not a dashboard.
         //
-        // Everything below sits on an 8PT GRID -- every position, size and gap is a multiple of 8 --
-        // because that is what stops a hand-placed layout drifting into near-misses that read as
-        // sloppy without anyone being able to say why. Spacing follows internal <= external: padding
-        // inside a card is smaller than the gap between cards, so cards group visually instead of
-        // merging into a field.
-        //
-        // Type scale is deliberate rather than incidental: 34 display / 26 action / 22 section /
-        // 15 body / 12 label / 10 micro. Six steps, each clearly apart, so weight and size do the
-        // hierarchy instead of boxes and rules.
-        const int M = 40, CW = W - M * 2;               // 40 margin, 640 content
+        // The previous version put the hero, two button rows, a segmented control, eight shop cards
+        // and a utility row on one screen. Everything was the same dark rectangle at the same value,
+        // so nothing led and the whole thing read as a settings page. Casual menus that work are
+        // blunt: big art, ONE huge action, and navigation as oversized icons -- the shop lives
+        // behind one of them (ShowStudio) instead of on the front page.
+        const int M = 32, CW = W - M * 2;
         AddPanel(0, 0, W, H, RushhouseUIKit.Bg, uiRoot, "menu-bg");
 
-        // --- header ---------------------------------------------------------------------------
-        AddText("RUSHHOUSE", M, 72, 34, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "m-word");
-        AddText("DINER", M, 104, 18, RushhouseUIKit.Primary, FontStyle.Bold, TextAnchor.MiddleLeft, "m-word2");
-        Surface(W - M - 176, 64, 176, 56, RushhouseUIKit.Surface, 28, false, "m-coinpill");
-        AddText(save.coins.ToString(), W - M - 24, 84, 22, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "m-coins");
-        AddText("COINS", W - M - 24, 106, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "m-coinlab");
+        // --- hero: nearly half the screen, art first ---------------------------------------------
+        int heroH = 648;
+        AddMenuImage("m-hero", "menu_hero", 0, 0, W, heroH, Color.white, false);
+        // Long fade into the page rather than a hard edge, so the art belongs to the screen instead
+        // of sitting in a slot. Stacked bands because there is no gradient shader here.
+        for (int i = 0; i < 8; i++)
+            AddPanel(0, heroH - 200 + i * 25, W, 25,
+                     new Color(RushhouseUIKit.Bg.r, RushhouseUIKit.Bg.g, RushhouseUIKit.Bg.b, .13f + i * .12f),
+                     uiRoot, "m-hero-fade" + i);
 
-        // --- hero -------------------------------------------------------------------------------
-        // The source art's bronze border was cropped out of the PNG itself; it could not be fixed
-        // here because it was painted into the image.
-        int heroY = 152, heroH = 288;
-        Surface(M, heroY, CW, heroH, RushhouseUIKit.Bg, 24, true, "m-hero-bg");
-        AddMenuImage("m-hero", "menu_hero", M, heroY, CW, heroH, Color.white, false);
-        AddPanel(M, heroY + heroH - 112, CW, 112, new Color(0f, 0f, 0f, .66f), uiRoot, "m-hero-scrim");
-        AddText("DAY " + save.day, M + 24, heroY + heroH - 72, 30, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "m-day");
-        AddText("REP " + save.reputation + "   BEST DAY " + save.bestDay, M + 24, heroY + heroH - 40, 12,
-                RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "m-rep");
-        DrawStarPips(W - M - 120, heroY + heroH - 48, 16);
-        if (OwnedPerkCount() > 0)
-            AddText(OwnedPerkCount() + "/" + allPerks.Count + " PERKS", W - M - 24, heroY + heroH - 80, 12,
-                    violet, FontStyle.Bold, TextAnchor.MiddleRight, "m-perks");
+        // --- currency, floating over the art -----------------------------------------------------
+        Surface(W - M - 176, 40, 176, 56, new Color(0f, 0f, 0f, .55f), 28, false, "m-coinpill");
+        AddText(save.coins.ToString(), W - M - 24, 60, 22, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "m-coins");
+        AddText("COINS", W - M - 24, 82, 10, new Color(1, 1, 1, .66f), FontStyle.Bold, TextAnchor.MiddleRight, "m-coinlab");
 
-        // --- primary action ----------------------------------------------------------------------
-        SolidButton("OPEN SHIFT " + save.day, M, 472, CW, 96, RushhouseUIKit.Primary, Color.white,
-                    StartDay, "m-open", 26, "Start the day's service");
-        // Top highlight: a flat fill reads as a sticker, a lit top edge reads as a raised object.
-        // This is the cheapest honest depth cue available without gradient shaders.
-        AddPanel(M + 8, 480, CW - 16, 32, new Color(1f, 1f, 1f, .10f), uiRoot, "m-open-gloss");
+        // --- wordmark sits ON the art, big -------------------------------------------------------
+        AddText("RUSHHOUSE", M, 448, 46, Color.white, FontStyle.Bold, TextAnchor.MiddleLeft, "m-word");
+        AddText("DINER", M + 6, 492, 22, RushhouseUIKit.Primary, FontStyle.Bold, TextAnchor.MiddleLeft, "m-word2");
+        AddText("DAY " + save.day + "   -   REP " + save.reputation, M, 536, 14, new Color(1, 1, 1, .78f),
+                FontStyle.Bold, TextAnchor.MiddleLeft, "m-day");
+        DrawStarPips(M, 560, 18);
 
-        // --- secondary pair ----------------------------------------------------------------------
-        int halfW = (CW - 16) / 2;
-        SolidButton("FLOORPLAN", M, 584, halfW, 72, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink,
-                    ShowLayout, "m-floor", 18);
-        SolidButton("RECIPES", M + halfW + 16, 584, halfW, 72, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink,
-                    ShowRecipes, "m-recipes", 18);
+        // --- the one action ----------------------------------------------------------------------
+        // Glow first, button on top: a flat rectangle of colour is a sticker, a lit one is an object
+        // you want to press. Concentric low-alpha rounds fake the bloom cheaply.
+        for (int i = 3; i >= 1; i--)
+            Surface(M - i * 8, 700 - i * 6, CW + i * 16, 112 + i * 12,
+                    new Color(RushhouseUIKit.Primary.r, RushhouseUIKit.Primary.g, RushhouseUIKit.Primary.b, .05f),
+                    32, false, "m-open-glow" + i);
+        SolidButton("OPEN SHIFT " + save.day, M, 700, CW, 112, RushhouseUIKit.Primary, Color.white,
+                    StartDay, "m-open", 30, "Start the day's service");
+        AddPanel(M + 10, 710, CW - 20, 36, new Color(1f, 1f, 1f, .12f), uiRoot, "m-open-gloss");
 
-        // --- studio ------------------------------------------------------------------------------
-        AddText("STUDIO", M, 696, 22, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "m-studio");
-        AddText(save.theme.ToUpperInvariant() + " MENU", W - M, 698, 12, RushhouseUIKit.Teal, FontStyle.Bold,
-                TextAnchor.MiddleRight, "m-theme-lab");
-        BuildStudioTabs();
-        BuildShop(shopTab);
+        // --- today's target, so the button has a reason ------------------------------------------
+        var g0 = dailyGoals.FirstOrDefault();
+        if (g0 != null)
+            AddText("TODAY:  " + g0.label, W / 2, 844, 13, RushhouseUIKit.Muted, FontStyle.Bold,
+                    TextAnchor.MiddleCenter, "m-today");
 
-        // --- utilities, quiet, still 48px tall so they stay comfortably tappable -----------------
-        int uw = (CW - 16) / 3;
-        SolidButton(save.theme.ToUpperInvariant(), M, 1160, uw, 64, RushhouseUIKit.Surface,
+        // --- navigation: oversized tiles, one row, labelled --------------------------------------
+        int tileW = (CW - 24) / 4, tileH = 148, navY = 884;
+        void NavTile(int i, string label, Sprite icon, Color tint, Action act) {
+            int tx2 = M + i * (tileW + 8);
+            Surface(tx2, navY, tileW, tileH, RushhouseUIKit.Surface, 22, true, "m-nav" + i);
+            Surface(tx2 + tileW / 2 - 28, navY + 18, 56, 56, new Color(tint.r, tint.g, tint.b, .18f), 18, false, "m-nav-ic" + i);
+            if (icon) AddUIImage("m-nav-img" + i, icon, tx2 + tileW / 2 - 24, navY + 22, 48, 48, Color.white, true);
+            AddText(label, tx2 + tileW / 2, navY + 112, 12, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleCenter, "m-nav-lab" + i);
+            var hit = new GameObject("m-nav-hit" + i, typeof(Image), typeof(Button));
+            hit.transform.SetParent(uiRoot, false);
+            var hi = hit.GetComponent<Image>();
+            hi.sprite = RushhouseUIKit.Rounded(22); hi.type = Image.Type.Sliced;
+            hi.color = new Color(1, 1, 1, 0f); hi.raycastTarget = true;
+            Place(hit.GetComponent<RectTransform>(), tx2, navY, tileW, tileH);
+            var hb = hit.GetComponent<Button>();
+            hb.transition = Selectable.Transition.None;
+            hb.onClick.AddListener(() => act?.Invoke());
+            RushhouseUIPress.Attach(hit);
+        }
+        var themeDish = recipes.FirstOrDefault(r => r.theme == save.theme);
+        NavTile(0, "STUDIO", ShopIconSprite("HOB"), RushhouseUIKit.Gold, ShowStudio);
+        NavTile(1, "FLOORPLAN", LayoutBuySprite("table"), RushhouseUIKit.Teal, ShowLayout);
+        NavTile(2, "RECIPES", themeDish != null ? FinalDishSprite(themeDish.id) : null, violet, ShowRecipes);
+        NavTile(3, "STYLE", ShopIconSprite("SHOES"), RushhouseUIKit.Primary, ShowWardrobe);
+
+        // --- quiet footer -------------------------------------------------------------------------
+        int fw = (CW - 16) / 2;
+        SolidButton(save.theme.ToUpperInvariant() + " MENU", M, 1064, fw, 64, RushhouseUIKit.Surface,
                     RushhouseUIKit.Muted, CycleTheme, "m-theme", 14);
-        SolidButton("STYLE", M + uw + 8, 1160, uw, 64, RushhouseUIKit.Surface,
-                    RushhouseUIKit.Muted, ShowWardrobe, "m-style", 14);
-        SolidButton("SETTINGS", M + (uw + 8) * 2, 1160, uw, 64, RushhouseUIKit.Surface,
+        SolidButton("SETTINGS", M + fw + 16, 1064, fw, 64, RushhouseUIKit.Surface,
                     RushhouseUIKit.Muted, DrawSettingsOverlay, "m-settings", 14);
 
-        if (messageTimer > 0) AddText(message, W / 2, 456, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "m-msg");
+        if (messageTimer > 0) AddText(message, W / 2, 1164, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "m-msg");
         AnimateUIIn("menu");
     }
 
     // big, obvious, filled tabs — the old thin ones were invisible AND got wiped by BuildShop
+    /// <summary>
+    /// The shop, as its own screen. It used to be crammed under the menu's fold, which is what made
+    /// the front page read as a dashboard instead of a front door.
+    /// </summary>
+    void ShowStudio()
+    {
+        screen = ScreenMode.Menu;
+        ClearUI();
+        const int M = 32, CW = W - M * 2;
+        AddPanel(0, 0, W, H, RushhouseUIKit.Bg, uiRoot, "studio-bg");
+        Surface(M, 40, CW, 88, RushhouseUIKit.Surface, 20, true, "studio-head");
+        AddText("STUDIO", M + 20, 72, 24, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "st-title");
+        AddText("UPGRADES, EQUIPMENT & STAFF", M + 20, 100, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "st-sub");
+        AddText(save.coins.ToString(), W - M - 24, 78, 22, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "st-coins");
+        BuildStudioTabs();
+        BuildShop(shopTab);
+        SolidButton("BACK", M, 1176, CW, 72, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, ShowMenu, "st-back", 18);
+        AnimateUIIn("studio");
+    }
+
     // A segmented control, not three separate painted buttons. One rounded track, the active
     // segment filled: that is how a modern app shows "which of these am I looking at", and it
     // removes the need for the underline + caption the old version needed to be legible.
@@ -1513,7 +1548,7 @@ public class RushhouseUnityGame : MonoBehaviour
             if (Application.isPlaying) Destroy(child.gameObject);
             else DestroyImmediate(child.gameObject);
         }
-        const int M = 40, trackY = 728, trackH = 56;
+        const int M = 32, trackY = 152, trackH = 56;
         int trackW = W - M * 2;
         Surface(M, trackY, trackW, trackH, RushhouseUIKit.Surface, 18, false, "studio-tab-track");
         string[] ids = { "upgrades", "equipment", "staff" };
@@ -1549,32 +1584,32 @@ public class RushhouseUnityGame : MonoBehaviour
         }
         // Two columns across the same 40px margins as everything else. No section caption: the
         // active segment above already says which tab this is, and repeating it was pure noise.
-        int leftX = 40;
-        int rightX = 372;
+        int leftX = 32;
+        int rightX = 364;
         if (tab == "upgrades") {
-            AddShopCard("SHOES", "move +" + save.speed, Cost(90, save.speed), leftX, 800, mint, () => BuyUpgrade("speed"));
-            AddShopCard("HOB", "cook +" + save.grill, Cost(110, save.grill), rightX, 800, red, () => BuyUpgrade("grill"));
-            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 880, green, () => BuyUpgrade("prep"));
-            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 880, blue, () => BuyUpgrade("patience"));
-            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 960, mint, () => BuyUpgrade("sink"));
-            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 960, gold, () => BuyUpgrade("room"));
-            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 1040, violet, () => BuyUpgrade("decor"));
-            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 1040, green, () => BuyUpgrade("marketing"));
+            AddShopCard("SHOES", "move +" + save.speed, Cost(90, save.speed), leftX, 232, mint, () => BuyUpgrade("speed"));
+            AddShopCard("HOB", "cook +" + save.grill, Cost(110, save.grill), rightX, 232, red, () => BuyUpgrade("grill"));
+            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 320, green, () => BuyUpgrade("prep"));
+            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 320, blue, () => BuyUpgrade("patience"));
+            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 408, mint, () => BuyUpgrade("sink"));
+            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 408, gold, () => BuyUpgrade("room"));
+            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 496, violet, () => BuyUpgrade("decor"));
+            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 496, green, () => BuyUpgrade("marketing"));
         } else if (tab == "equipment") {
-            AddShopCard("COUNTER", $"floor {Math.Min(OwnedCount("counter"), MaxOwned("counter"))}/{MaxOwned("counter")}", EquipmentCost("counter"), leftX, 800, violet, () => BuyEquipment("counter"), OwnedCount("counter") >= MaxOwned("counter"));
-            AddShopCard("TABLE", $"floor {Math.Min(save.table, MaxOwned("table"))}/{MaxOwned("table")}", EquipmentCost("table"), rightX, 800, gold, () => BuyEquipment("table"), save.table >= MaxOwned("table"));
-            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 880, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
-            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 880, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
-            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 960, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
+            AddShopCard("COUNTER", $"floor {Math.Min(OwnedCount("counter"), MaxOwned("counter"))}/{MaxOwned("counter")}", EquipmentCost("counter"), leftX, 232, violet, () => BuyEquipment("counter"), OwnedCount("counter") >= MaxOwned("counter"));
+            AddShopCard("TABLE", $"floor {Math.Min(save.table, MaxOwned("table"))}/{MaxOwned("table")}", EquipmentCost("table"), rightX, 232, gold, () => BuyEquipment("table"), save.table >= MaxOwned("table"));
+            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 320, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
+            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 320, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
+            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 408, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
             if (save.theme == "pizza")
-                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 960, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
+                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 408, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
             else if (save.theme == "coffee")
-                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 960, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
+                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 408, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
         } else {
-            AddShopCard("WAITER", "takes orders + serves", StaffCost(save.waiter), leftX, 800, gold, () => BuyStaff("waiter"), save.waiter >= 3);
-            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 880, red, () => BuyStaff("cook"), save.cook >= 3);
-            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 960, blue, () => BuyStaff("washer"), save.washer >= 3);
-            AddShopCard("PREPPER", "chops + plates", StaffCost(save.prepper), rightX, 800, green, () => BuyStaff("prepper"), save.prepper >= 3);
+            AddShopCard("WAITER", "takes orders + serves", StaffCost(save.waiter), leftX, 232, gold, () => BuyStaff("waiter"), save.waiter >= 3);
+            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 320, red, () => BuyStaff("cook"), save.cook >= 3);
+            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 408, blue, () => BuyStaff("washer"), save.washer >= 3);
+            AddShopCard("PREPPER", "chops + plates", StaffCost(save.prepper), rightX, 232, green, () => BuyStaff("prepper"), save.prepper >= 3);
         }
     }
 
