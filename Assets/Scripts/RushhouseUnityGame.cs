@@ -1432,45 +1432,71 @@ public class RushhouseUnityGame : MonoBehaviour
         ClearStaticWorld();
         TrimPropPool();
         ClearUI();
-        AddPanel(0, 0, W, H, new Color(.006f, .008f, .012f, 1), uiRoot, "menu-bg");
-        AddMenuImage("menu-panel", "menu_panel", 34, 28, 652, 1152, new Color(1, 1, 1, .98f), false);
-        AddMenuImage("menu-hero", "menu_hero", 64, 50, 592, 246, Color.white, false);
-        AddPanel(64, 238, 592, 58, new Color(.01f, .012f, .016f, .44f), uiRoot, "menu-hero-fade");
-        AddMenuImage("menu-title-plate", "title_plaque", 68, 314, 584, 106, Color.white, false);
-        AddText("RUSHHOUSE", 100, 348, 31, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText("DAY " + save.day, 580, 342, 19, gold, FontStyle.Bold, TextAnchor.MiddleRight);
-        AddText(save.coins + " COINS", 580, 376, 14, mint, FontStyle.Bold, TextAnchor.MiddleRight);
-        AddText("REP " + save.reputation + "   BEST D" + save.bestDay, 102, 386, 11, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-        DrawStarPips(102, 398, 14);   // restaurant star level (drives customer flow)
-        if (OwnedPerkCount() > 0) {
-            AddText("PERKS " + OwnedPerkCount() + "/" + allPerks.Count, 580, 404, 11, violet, FontStyle.Bold, TextAnchor.MiddleRight);
-            AddText(PerkSummary(), 360, 420, 9, violet, FontStyle.Bold, TextAnchor.MiddleCenter);
-        }
-        if (messageTimer > 0) AddText(message, 360, 430, 13, text, FontStyle.Bold);
+        // REBUILT FROM SCRATCH. No menu_panel / title_plaque / shop_panel frame artwork anywhere:
+        // those sprites carry their own gold filigree and bevels, so nesting them produced frames
+        // inside frames, which is the single thing that dated this screen most. Structure now:
+        // header -> hero -> one clear primary action -> secondary pair -> studio. Spacing and
+        // contrast separate the sections; nothing is boxed.
+        const int M = 40, CW = W - M * 2;                // 40px side margins, 640 content width
+        AddPanel(0, 0, W, H, RushhouseUIKit.Bg, uiRoot, "menu-bg");
 
-        AddImageButton("OPEN SHIFT " + save.day, "primary_button", 72, 452, 276, 74, StartDay, "menu-open", 16, text);
-        AddImageButton("FLOORPLAN", "secondary_button", 372, 452, 276, 74, ShowLayout, "menu-floorplan", 16, text);
-        // five equal slots across the 72..648 content band (104 wide, 14 apart)
-        AddImageButton("RECIPES", "tab_gold", 72, 540, 104, 54, ShowRecipes, "menu-recipes", 12, text);
-        AddImageButton(save.theme.ToUpperInvariant(), "tab_dark", 190, 540, 104, 54, CycleTheme, "menu-theme", 12, text);
-        AddImageButton("STYLE", "tab_gold", 308, 540, 104, 54, ShowWardrobe, "menu-wardrobe", 12, text);
-        AddImageButton("AUDIO", "tab_dark", 426, 540, 104, 54, DrawSettingsOverlay, "menu-audio", 12, text);
-        AddImageButton("RESET", "danger_button", 544, 540, 104, 54, ResetSave, "menu-reset", 12, text);
+        // --- header: wordmark left, coins right ---------------------------------------------
+        AddText("RUSHHOUSE", M, 74, 34, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "m-word");
+        AddText("DINER", M, 110, 20, RushhouseUIKit.Primary, FontStyle.Bold, TextAnchor.MiddleLeft, "m-word2");
+        Surface(W - M - 168, 62, 168, 56, RushhouseUIKit.Surface, 28, false, "m-coinpill");
+        AddText(save.coins.ToString(), W - M - 22, 88, 22, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "m-coins");
+        AddText("COINS", W - M - 22, 110, 9, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "m-coinlab");
 
-        AddMenuImage("studio-frame", "shop_panel", 58, 626, 604, 430, Color.white, false);
-        // studio interior shares one symmetric content band [106..614] (centre 360)
-        AddText("STUDIO", 106, 666, 23, text, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText("UPGRADES & STAFF", 614, 670, 10, gold, FontStyle.Bold, TextAnchor.MiddleRight);
-        // NOTE: these MUST NOT be named "shop-*" — BuildShop() wipes every child whose name starts
-        // with "shop-", which was destroying the tabs themselves (so the shop was stuck on one tab
-        // and EQUIPMENT / STAFF were unreachable).
+        // --- hero: the art, rounded, with the day/stars sitting ON it -----------------------
+        int heroY = 150, heroH = 300;
+        Surface(M, heroY, CW, heroH, RushhouseUIKit.Bg, 28, true, "m-hero-bg");
+        AddMenuImage("m-hero", "menu_hero", M + 6, heroY + 6, CW - 12, heroH - 12, Color.white, false);
+        // Scrim so white text stays readable over any part of the photo.
+        AddPanel(M + 6, heroY + heroH - 118, CW - 12, 112, new Color(0f, 0f, 0f, .62f), uiRoot, "m-hero-scrim");
+        AddText("DAY " + save.day, M + 30, heroY + heroH - 76, 30, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "m-day");
+        AddText("REP " + save.reputation + "   BEST DAY " + save.bestDay, M + 30, heroY + heroH - 40, 12,
+                RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "m-rep");
+        DrawStarPips(W - M - 128, heroY + heroH - 52, 16);
+        if (OwnedPerkCount() > 0)
+            AddText(OwnedPerkCount() + "/" + allPerks.Count + " PERKS", W - M - 30, heroY + heroH - 84, 12,
+                    violet, FontStyle.Bold, TextAnchor.MiddleRight, "m-perks");
+
+        // --- ONE primary action, full width. The old screen gave OPEN SHIFT and FLOORPLAN equal
+        // weight side by side, so nothing read as the thing to press.
+        SolidButton("OPEN SHIFT " + save.day, M, 480, CW, 92, RushhouseUIKit.Primary, Color.white,
+                    StartDay, "m-open", 26, "Start the day's service");
+
+        // --- secondary pair -----------------------------------------------------------------
+        int halfW = (CW - 16) / 2;
+        SolidButton("FLOORPLAN", M, 592, halfW, 68, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink,
+                    ShowLayout, "m-floor", 18);
+        SolidButton("RECIPES", M + halfW + 16, 592, halfW, 68, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink,
+                    ShowRecipes, "m-recipes", 18);
+
+        // --- studio: a section, not a framed box ---------------------------------------------
+        AddText("STUDIO", M, 706, 22, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "m-studio");
+        AddText(save.theme.ToUpperInvariant() + " MENU", W - M, 708, 12, RushhouseUIKit.Teal, FontStyle.Bold,
+                TextAnchor.MiddleRight, "m-theme-lab");
         BuildStudioTabs();
-        AddMenuImage("studio-divider", "divider_teal", 106, 1070, 508, 18, Color.white, false);
         BuildShop(shopTab);
+
+        // --- utility row, bottom, deliberately quiet ------------------------------------------
+        int uw = (CW - 24) / 3;
+        SolidButton(save.theme.ToUpperInvariant(), M, H - 108, uw, 60, RushhouseUIKit.Surface,
+                    RushhouseUIKit.Muted, CycleTheme, "m-theme", 14);
+        SolidButton("STYLE", M + uw + 12, H - 108, uw, 60, RushhouseUIKit.Surface,
+                    RushhouseUIKit.Muted, ShowWardrobe, "m-style", 14);
+        SolidButton("SETTINGS", M + (uw + 12) * 2, H - 108, uw, 60, RushhouseUIKit.Surface,
+                    RushhouseUIKit.Muted, DrawSettingsOverlay, "m-settings", 14);
+
+        if (messageTimer > 0) AddText(message, W / 2, 458, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "m-msg");
         AnimateUIIn("menu");
     }
 
     // big, obvious, filled tabs — the old thin ones were invisible AND got wiped by BuildShop
+    // A segmented control, not three separate painted buttons. One rounded track, the active
+    // segment filled: that is how a modern app shows "which of these am I looking at", and it
+    // removes the need for the underline + caption the old version needed to be legible.
     void BuildStudioTabs()
     {
         foreach (Transform child in uiRoot) {
@@ -1478,16 +1504,29 @@ public class RushhouseUnityGame : MonoBehaviour
             if (Application.isPlaying) Destroy(child.gameObject);
             else DestroyImmediate(child.gameObject);
         }
+        const int M = 40, trackY = 740, trackH = 58;
+        int trackW = W - M * 2;
+        Surface(M, trackY, trackW, trackH, RushhouseUIKit.Surface, 18, false, "studio-tab-track");
         string[] ids = { "upgrades", "equipment", "staff" };
         string[] labels = { "UPGRADES", "EQUIPMENT", "STAFF" };
-        int[] xs = { 100, 276, 452 };
+        int segW = (trackW - 12) / 3;
         for (int i = 0; i < 3; i++) {
             string id = ids[i];
             bool on = shopTab == id;
-            AddPanel(xs[i], 698, 168, 56, on ? new Color(.13f, .55f, .52f, 1) : new Color(.09f, .11f, .15f, 1), uiRoot, "studio-tab-bg");
-            AddImageButton(labels[i], on ? "primary_button" : "secondary_button", xs[i], 698, 168, 56,
-                           () => { BuildShop(id); BuildStudioTabs(); }, "studio-tab", 14, on ? Color.white : muted);
-            if (on) AddPanel(xs[i] + 12, 750, 144, 5, gold, uiRoot, "studio-tab-underline");   // active indicator
+            int sx = M + 6 + i * segW;
+            if (on) Surface(sx, trackY + 6, segW, trackH - 12, RushhouseUIKit.Teal, 14, false, "studio-tab-on");
+            var go = new GameObject("studio-tab-hit", typeof(Image), typeof(Button));
+            go.transform.SetParent(uiRoot, false);
+            var img = go.GetComponent<Image>();
+            img.sprite = RushhouseUIKit.Rounded(14); img.type = Image.Type.Sliced;
+            img.color = new Color(1, 1, 1, 0f); img.raycastTarget = true;
+            Place(go.GetComponent<RectTransform>(), sx, trackY + 6, segW, trackH - 12);
+            var btn = go.GetComponent<Button>();
+            btn.transition = Selectable.Transition.None;
+            btn.onClick.AddListener(() => { BuildShop(id); BuildStudioTabs(); });
+            RushhouseUIPress.Attach(go);
+            AddText(labels[i], sx + segW / 2, trackY + trackH / 2, 14,
+                    on ? Color.white : RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "studio-tab-label");
         }
     }
 
@@ -1499,57 +1538,71 @@ public class RushhouseUnityGame : MonoBehaviour
             if (Application.isPlaying) Destroy(child.gameObject);
             else DestroyImmediate(child.gameObject);
         }
-        // two-column card grid centred in the [106..614] band (was left-shifted to 86/354)
-        int leftX = 106;
-        int rightX = 376;
-        AddText(tab.ToUpperInvariant(), 360, 782, 12, tab == "staff" ? green : tab == "equipment" ? blue : gold, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-caption");
+        // Two columns across the same 40px margins as everything else. No section caption: the
+        // active segment above already says which tab this is, and repeating it was pure noise.
+        int leftX = 40;
+        int rightX = 366;
         if (tab == "upgrades") {
-            AddShopCard("SHOES", "move +" + save.speed, Cost(90, save.speed), leftX, 804, mint, () => BuyUpgrade("speed"));
-            AddShopCard("HOB", "cook +" + save.grill, Cost(110, save.grill), rightX, 804, red, () => BuyUpgrade("grill"));
-            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 864, green, () => BuyUpgrade("prep"));
-            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 864, blue, () => BuyUpgrade("patience"));
-            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 924, mint, () => BuyUpgrade("sink"));
-            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 924, gold, () => BuyUpgrade("room"));
-            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 984, violet, () => BuyUpgrade("decor"));
-            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 984, green, () => BuyUpgrade("marketing"));
+            AddShopCard("SHOES", "move +" + save.speed, Cost(90, save.speed), leftX, 820, mint, () => BuyUpgrade("speed"));
+            AddShopCard("HOB", "cook +" + save.grill, Cost(110, save.grill), rightX, 820, red, () => BuyUpgrade("grill"));
+            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 896, green, () => BuyUpgrade("prep"));
+            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 896, blue, () => BuyUpgrade("patience"));
+            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 972, mint, () => BuyUpgrade("sink"));
+            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 972, gold, () => BuyUpgrade("room"));
+            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 1048, violet, () => BuyUpgrade("decor"));
+            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 1048, green, () => BuyUpgrade("marketing"));
         } else if (tab == "equipment") {
-            AddShopCard("COUNTER", $"floor {Math.Min(OwnedCount("counter"), MaxOwned("counter"))}/{MaxOwned("counter")}", EquipmentCost("counter"), leftX, 804, violet, () => BuyEquipment("counter"), OwnedCount("counter") >= MaxOwned("counter"));
-            AddShopCard("TABLE", $"floor {Math.Min(save.table, MaxOwned("table"))}/{MaxOwned("table")}", EquipmentCost("table"), rightX, 804, gold, () => BuyEquipment("table"), save.table >= MaxOwned("table"));
-            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 864, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
-            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 864, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
-            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 924, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
+            AddShopCard("COUNTER", $"floor {Math.Min(OwnedCount("counter"), MaxOwned("counter"))}/{MaxOwned("counter")}", EquipmentCost("counter"), leftX, 820, violet, () => BuyEquipment("counter"), OwnedCount("counter") >= MaxOwned("counter"));
+            AddShopCard("TABLE", $"floor {Math.Min(save.table, MaxOwned("table"))}/{MaxOwned("table")}", EquipmentCost("table"), rightX, 820, gold, () => BuyEquipment("table"), save.table >= MaxOwned("table"));
+            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 896, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
+            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 896, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
+            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 972, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
             if (save.theme == "pizza")
-                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 924, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
+                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 972, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
             else if (save.theme == "coffee")
-                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 924, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
+                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 972, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
         } else {
-            AddShopCard("WAITER", "takes orders + serves", StaffCost(save.waiter), leftX, 804, gold, () => BuyStaff("waiter"), save.waiter >= 3);
-            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 864, red, () => BuyStaff("cook"), save.cook >= 3);
-            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 924, blue, () => BuyStaff("washer"), save.washer >= 3);
-            AddShopCard("PREPPER", "chops + plates", StaffCost(save.prepper), rightX, 804, green, () => BuyStaff("prepper"), save.prepper >= 3);
+            AddShopCard("WAITER", "takes orders + serves", StaffCost(save.waiter), leftX, 820, gold, () => BuyStaff("waiter"), save.waiter >= 3);
+            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 896, red, () => BuyStaff("cook"), save.cook >= 3);
+            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 972, blue, () => BuyStaff("washer"), save.washer >= 3);
+            AddShopCard("PREPPER", "chops + plates", StaffCost(save.prepper), rightX, 820, green, () => BuyStaff("prepper"), save.prepper >= 3);
         }
     }
 
     void AddShopCard(string title, string desc, int cost, int x, int y, Color stroke, Action action, bool soldOut = false)
     {
-        const int cardW = 238, cardH = 60;
+        // Soft elevated card, no stroke. The old version leaned on a coloured border to tell cards
+        // apart, which is exactly the framed look being removed; the accent now lives in a small
+        // colour bar behind the icon so the card itself stays calm.
+        const int cardW = 274, cardH = 68;
         bool broke = !soldOut && save.coins < cost;
-        // hit area first, card art on top (so labels are never painted over); an unaffordable card is
-        // inert too — its red price is the feedback (#37)
-        if (!soldOut && !broke) AddButton("", x, y, cardW, cardH, stroke, action, "shop-card");
-        AddCard(x, y, cardW, cardH, soldOut ? muted : broke ? new Color(.5f, .5f, .55f) : stroke, "shop" + title, .94f);
+        if (!soldOut && !broke) {
+            var hit = new GameObject("shop-card", typeof(Image), typeof(Button));
+            hit.transform.SetParent(uiRoot, false);
+            var hi = hit.GetComponent<Image>();
+            hi.sprite = RushhouseUIKit.Rounded(18); hi.type = Image.Type.Sliced;
+            hi.color = new Color(1, 1, 1, 0f); hi.raycastTarget = true;
+            Place(hit.GetComponent<RectTransform>(), x, y, cardW, cardH);
+            var hb = hit.GetComponent<Button>();
+            hb.transition = Selectable.Transition.None;
+            hb.onClick.AddListener(() => action?.Invoke());
+            RushhouseUIPress.Attach(hit);
+        }
+        Surface(x, y, cardW, cardH, soldOut ? new Color(.11f, .13f, .16f) : RushhouseUIKit.SurfaceHi,
+                18, !soldOut, "shop" + title);
         Color iconTint = soldOut ? new Color(1, 1, 1, .3f) : broke ? new Color(1, 1, 1, .55f) : Color.white;
-        AddPanel(x + 10, y + 12, 40, 40, new Color(1, 1, 1, .06f), uiRoot, "shop-icon-bg");
-        AddUIImage("shop-icon-" + title, ShopIconSprite(title), x + 12, y + 14, 36, 36, iconTint, true);
-        AddText(title, x + 60, y + 24, 14, soldOut ? muted : text, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-title");
-        AddText(desc, x + 60, y + 44, 9, muted, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-desc");
+        Surface(x + 12, y + 12, 44, 44, new Color(stroke.r, stroke.g, stroke.b, soldOut ? .10f : .22f), 14, false, "shop-icon-bg");
+        AddUIImage("shop-icon-" + title, ShopIconSprite(title), x + 16, y + 16, 36, 36, iconTint, true);
+        AddText(title, x + 68, y + 26, 15, soldOut ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
+                FontStyle.Bold, TextAnchor.MiddleLeft, "shop-title");
+        AddText(desc, x + 68, y + 48, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-desc");
         if (soldOut) DrawSoldOutBadge(x, y, cardW, cardH);
         else {
-            // price pill so the cost reads at a glance and turns red when unaffordable
-            Color pc = broke ? red : gold;
-            int pw = 62;
-            AddPanel(x + cardW - pw - 10, y + 18, pw, 24, new Color(pc.r, pc.g, pc.b, .18f), uiRoot, "shop-price-bg");
-            AddText(cost.ToString(), x + cardW - 10 - pw / 2, y + 30, 13, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-cost");
+            // Price pill: gold when affordable, red when not — the only feedback an inert card gets.
+            Color pc = broke ? RushhouseUIKit.Danger : RushhouseUIKit.Gold;
+            int pw = 68;
+            Surface(x + cardW - pw - 12, y + 21, pw, 26, new Color(pc.r, pc.g, pc.b, .16f), 13, false, "shop-price-bg");
+            AddText(cost.ToString(), x + cardW - 12 - pw / 2, y + 30, 14, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-cost");
         }
     }
 
@@ -6256,6 +6309,68 @@ public class RushhouseUnityGame : MonoBehaviour
         t.resizeTextForBestFit = false;
         t.raycastTarget = false;
         return t;
+    }
+
+    // ---------------- modern surface kit ----------------
+    // Replaces the ornate frame ARTWORK the menus used to be built from. Those sprites carried their
+    // own gold filigree and bevels, so nesting any two produced frames inside frames and no amount
+    // of re-layout could fix it. These draw the shapes current casual games actually use: a rounded
+    // rectangle, optionally lifted off the background by a soft shadow, with contrast and spacing
+    // doing the job the borders used to do.
+
+    /// <summary>Rounded panel. `elevated` adds the drop shadow that separates it from the ground.</summary>
+    GameObject Surface(int x, int y, int w, int h, Color fill, int radius, bool elevated, string name)
+    {
+        if (elevated) {
+            var sh = new GameObject(name + "-shadow", typeof(Image));
+            sh.transform.SetParent(uiRoot, false);
+            var si = sh.GetComponent<Image>();
+            si.sprite = RushhouseUIKit.Shadow(radius);
+            si.type = Image.Type.Sliced;
+            si.color = new Color(0f, 0f, 0f, .5f);
+            si.raycastTarget = false;
+            // Offset down, not centred: light comes from above, so the shadow belongs below.
+            Place(sh.GetComponent<RectTransform>(), x - 10, y - 4, w + 20, h + 22);
+        }
+        var go = new GameObject(name, typeof(Image));
+        go.transform.SetParent(uiRoot, false);
+        var img = go.GetComponent<Image>();
+        img.sprite = RushhouseUIKit.Rounded(radius);
+        img.type = Image.Type.Sliced;
+        img.color = fill;
+        img.raycastTarget = false;
+        Place(go.GetComponent<RectTransform>(), x, y, w, h);
+        return go;
+    }
+
+    /// <summary>
+    /// A solid rounded button with a label, and optionally a smaller caption under it. One shape for
+    /// every action in the game — the old UI had four different button artworks competing.
+    /// </summary>
+    Button SolidButton(string label, int x, int y, int w, int h, Color fill, Color labelColor,
+                       Action action, string name, int fontSize = 20, string caption = null)
+    {
+        Surface(x, y, w, h, fill, Mathf.Min(26, h / 2), true, name + "-bg");
+        var go = new GameObject(name, typeof(Image), typeof(Button));
+        go.transform.SetParent(uiRoot, false);
+        var img = go.GetComponent<Image>();
+        img.sprite = RushhouseUIKit.Rounded(Mathf.Min(26, h / 2));
+        img.type = Image.Type.Sliced;
+        img.color = new Color(1, 1, 1, 0f);          // invisible hit layer over the drawn surface
+        img.raycastTarget = true;
+        Place(go.GetComponent<RectTransform>(), x, y, w, h);
+        var btn = go.GetComponent<Button>();
+        btn.transition = Selectable.Transition.None;
+        btn.onClick.AddListener(() => action?.Invoke());
+        // Same convention AddImageButton uses for its own label.
+        int mid = y + h / 2;
+        AddText(label, x + w / 2, caption == null ? mid : mid - 13, fontSize, labelColor,
+                FontStyle.Bold, TextAnchor.MiddleCenter, name + "-label");
+        if (caption != null)
+            AddText(caption, x + w / 2, mid + 15, 12, new Color(labelColor.r, labelColor.g, labelColor.b, .72f),
+                    FontStyle.Bold, TextAnchor.MiddleCenter, name + "-cap");
+        RushhouseUIPress.Attach(go);
+        return btn;
     }
 
     void Place(RectTransform rt, int x, int y, int w, int h)
