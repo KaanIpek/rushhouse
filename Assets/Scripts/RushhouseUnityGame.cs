@@ -643,6 +643,7 @@ public class RushhouseUnityGame : MonoBehaviour
 
         AddIconButton("RESUME", "ic_open", px + 22, 730, pw - 44, 72, mint, () => { paused = false; BuildPlayUI(); }, "pause-resume");
         AddIconButton("QUIT TO MENU", "ic_back", px + 22, 812, pw - 44, 52, red, () => { paused = false; ShowMenu(); }, "pause-quit");
+        AnimateUIIn("pause", .018f, .2f);
     }
 
     // Audio settings reachable without starting a shift. Same rows as pause, so there is one
@@ -690,13 +691,14 @@ public class RushhouseUnityGame : MonoBehaviour
         // Community License, which obliges this exact string wherever the game is distributed.
         // It also lives in NOTICE and the README; this is the copy a player can actually see.
         AddText("Music powered by Stability AI", 360, creditY, 10, muted, FontStyle.Normal);
+        AnimateUIIn("settings", .018f, .2f);
     }
 
     // one settings row: name on the left, an ON/OFF pill on the right, whole row tappable
     void PauseToggle(string label, bool on, int y, System.Action flip, System.Action redraw = null)
     {
         const int px = 56, pw = 608;
-        AddHitArea(px + 22, y, pw - 44, 52, () => { flip(); Persist(); (redraw ?? DrawPauseOverlay)(); }, "pause-toggle");
+        AddHitArea(px + 22, y, pw - 44, 52, () => { flip(); Persist(); suppressAnim = true; (redraw ?? DrawPauseOverlay)(); }, "pause-toggle");
         AddChip(px + 22, y, pw - 44, 52, on ? mint : muted, "pause-toggle-bg", on ? .12f : .05f);
         AddText(label, px + 44, y + 26, 15, on ? Color.white : muted, FontStyle.Bold, TextAnchor.MiddleLeft, "pause-toggle-label");
         AddPanel(px + pw - 132, y + 11, 88, 30, on ? new Color(.24f, .78f, .58f, .9f) : new Color(1, 1, 1, .1f), uiRoot, "pause-pill");
@@ -1465,6 +1467,7 @@ public class RushhouseUnityGame : MonoBehaviour
         BuildStudioTabs();
         AddMenuImage("studio-divider", "divider_teal", 106, 1070, 508, 18, Color.white, false);
         BuildShop(shopTab);
+        AnimateUIIn("menu");
     }
 
     // big, obvious, filled tabs — the old thin ones were invisible AND got wiped by BuildShop
@@ -1622,6 +1625,7 @@ public class RushhouseUnityGame : MonoBehaviour
         staticDirty = true;                    // build the floor/walls once on entry, then reuse
         BuildLayoutUI();
         RebuildWorld();
+        AnimateUIIn("layout");
     }
 
     void ShowRecipes()
@@ -1703,6 +1707,10 @@ public class RushhouseUnityGame : MonoBehaviour
         if (messageTimer > 0) AddText(message, 360, 1018, 13, text, FontStyle.Bold);
         EnsureTouchControls();
         if (touchRoot) { touchRoot.SetActive(true); touchRoot.transform.SetAsLastSibling(); }
+        // Faster and shallower than the menus: this rebuilds mid-shift (opening an order card,
+        // closing pause), and a leisurely cascade over the HUD while customers are waiting would be
+        // in the way rather than pleasing. The token guard stops it replaying on every rebuild.
+        AnimateUIIn("play", .012f, .14f);
     }
 
     void AddActionStrip()
@@ -6096,6 +6104,41 @@ public class RushhouseUnityGame : MonoBehaviour
         var exit = new EventTrigger.Entry { eventID = EventTriggerType.PointerExit };
         exit.callback.AddListener(_ => holdPressed = false);
         trigger.triggers.Add(exit);
+    }
+
+    string lastAnimToken = "";
+    bool suppressAnim;      // set by in-screen redraws (a toggle flip) so the screen does not re-enter
+
+    /// <summary>
+    /// Staggered entrance for everything currently in uiRoot.
+    ///
+    /// Done here rather than at each call site because the UI is immediate-mode and flat: every
+    /// screen is a few dozen siblings created in whatever order the drawing code happens to run.
+    /// Sorting by descending y and stepping the delay turns that arbitrary order into a top-down
+    /// cascade, so the header lands first and the eye is led down the screen. Elements at the same
+    /// height get near-identical delays, which is what keeps a card and its own labels together
+    /// without needing a real hierarchy.
+    ///
+    /// `token` identifies the screen: re-entering the same one (a shop tab switch, a toggle) must
+    /// not replay the whole animation.
+    /// </summary>
+    void AnimateUIIn(string token, float stagger = .022f, float maxDelay = .34f)
+    {
+        if (uiRoot == null) return;
+        if (suppressAnim) { suppressAnim = false; lastAnimToken = token; return; }
+        if (lastAnimToken == token) return;
+        lastAnimToken = token;
+
+        var kids = new List<RectTransform>();
+        foreach (Transform c in uiRoot) if (c is RectTransform rt) kids.Add(rt);
+        // A CanvasGroup per element is cheap for a third of a second but not for a hundred of them;
+        // past that the entrance would cost more than it is worth, so skip rather than stutter.
+        if (kids.Count > 90) return;
+        kids.Sort((a, b) => b.anchoredPosition.y.CompareTo(a.anchoredPosition.y));
+        for (int i = 0; i < kids.Count; i++) {
+            RushhouseUIPop.Play(kids[i].gameObject, Mathf.Min(maxDelay, i * stagger), new Vector2(0f, 24f));
+            if (kids[i].GetComponent<Button>()) RushhouseUIPress.Attach(kids[i].gameObject);
+        }
     }
 
     void AddPanel(int x, int y, int w, int h, Color color, RectTransform parent, string name)
