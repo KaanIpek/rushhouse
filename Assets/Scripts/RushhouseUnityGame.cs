@@ -2038,52 +2038,80 @@ public class RushhouseUnityGame : MonoBehaviour
     void BuildLayoutUI()
     {
         ClearUI();
-        AddCard(20, 14, 680, 124, gold, "layout-hud", .95f);
-        AddText("FLOORPLAN", 48, 44, 22, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddChip(496, 28, 196, 40, gold, "layout-bank", .16f);
-        AddText(save.coins + " COINS", 676, 51, 14, gold, FontStyle.Bold, TextAnchor.MiddleRight);
-        AddText("Drag units to move.  Select one, then:", 48, 80, 10, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-        // control row: icon buttons for the deliberate actions
-        AddIconButton("ROTATE", "ic_rotate", 300, 88, 126, 40, gold, RotateSelected, "lay-rotate");
-        AddIconButton("SEATS", "ic_seats", 434, 88, 118, 40, violet, CycleSeats, "lay-seats");
-        AddIconButton("RESET", "ic_reset", 560, 88, 116, 40, muted, ResetLayout, "lay-reset");
-        if (messageTimer > 0) AddText(message, 360, 156, 13, text, FontStyle.Bold);
+        // Same system as the menu and the HUD: 8pt grid, 24 margin, rounded surfaces, no frames.
+        const int M = 24, CW = W - M * 2;
+        AddPanel(0, 0, W, H, new Color(0f, 0f, 0f, 0f), uiRoot, "layout-bg");
+
+        // --- header card ------------------------------------------------------------------------
+        Surface(M, 24, CW, 88, RushhouseUIKit.Surface, 20, true, "layout-hud");
+        AddText("FLOORPLAN", M + 20, 56, 22, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "lay-title");
+        AddText("Drag units to move", M + 20, 84, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "lay-hint");
+        Surface(W - M - 176, 40, 176, 56, RushhouseUIKit.SurfaceHi, 28, false, "layout-bank");
+        AddText(save.coins.ToString(), W - M - 24, 60, 20, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "lay-coins");
+        AddText("COINS", W - M - 24, 82, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "lay-coinlab");
+
+        // --- selection actions: only meaningful with something selected, so they read as a group --
+        int aw = (CW - 16) / 3;
+        SolidButton("ROTATE", M, 128, aw, 64, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, RotateSelected, "lay-rotate", 15);
+        SolidButton("SEATS", M + aw + 8, 128, aw, 64, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, CycleSeats, "lay-seats", 15);
+        SolidButton("RESET", M + (aw + 8) * 2, 128, aw, 64, RushhouseUIKit.Surface, RushhouseUIKit.Muted, ResetLayout, "lay-reset", 15);
+
+        if (messageTimer > 0) AddText(message, W / 2, 212, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "lay-msg");
         BuildLayoutStore();
-        AddIconButton("BACK", "ic_back", 80, 1138, 218, 72, blue, ShowMenu, "lay-back");
-        AddIconButton("OPEN", "ic_open", 330, 1138, 218, 72, mint, StartDay, "lay-open");
+
+        // --- bottom actions: BACK quiet, OPEN the primary --------------------------------------
+        int bw = (CW - 16) / 2;
+        SolidButton("BACK", M, 1176, bw, 72, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, ShowMenu, "lay-back", 18);
+        SolidButton("OPEN SHIFT", M + bw + 16, 1176, bw, 72, RushhouseUIKit.Primary, Color.white, StartDay, "lay-open", 18);
     }
 
     void BuildLayoutStore()
     {
-        AddCard(20, 946, 680, 178, mint, "layout-store", .95f);
-        AddText("BUY UNITS", 48, 972, 13, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddLayoutBuyCard("table", 36, 990, gold);
-        AddLayoutBuyCard("counter", 260, 990, violet);
-        AddLayoutBuyCard("hob", 484, 990, red);
-        AddLayoutBuyCard("drink", 36, 1058, green);
-        AddLayoutBuyCard("sink", 260, 1058, blue);
-        AddLayoutBuyCard("room", 484, 1058, mint);
+        const int M = 24, CW = W - M * 2;
+        AddText("BUY UNITS", M, 964, 14, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "store-title");
+        // Three columns on the grid: 3 * 208 + 2 * 24 gutters = 672 = CW.
+        int cw = (CW - 32) / 3;
+        AddLayoutBuyCard("table", M, 992, RushhouseUIKit.Gold);
+        AddLayoutBuyCard("counter", M + cw + 16, 992, violet);
+        AddLayoutBuyCard("hob", M + (cw + 16) * 2, 992, RushhouseUIKit.Primary);
+        AddLayoutBuyCard("drink", M, 1080, green);
+        AddLayoutBuyCard("sink", M + cw + 16, 1080, blue);
+        AddLayoutBuyCard("room", M + (cw + 16) * 2, 1080, RushhouseUIKit.Teal);
     }
 
     void AddLayoutBuyCard(string id, int x, int y, Color stroke)
     {
-        const int cardW = 198;
-        const int cardH = 58;
+        const int cardW = 208;
+        const int cardH = 72;
         bool isRoom = id == "room";
         bool maxed = isRoom ? save.room >= 2 : OwnedCount(id) >= MaxOwned(id);
         int cost = isRoom ? Cost(220, save.room) : EquipmentCost(id);
         Action action = isRoom ? () => BuyUpgrade("room", true) : () => BuyEquipment(id, true);
         bool broke = !maxed && save.coins < cost;
-        // hit area under the card art, matching the studio cards
-        if (!maxed && !broke) AddButton("", x, y, cardW, cardH, stroke, action, "layout-buy-" + id);
-        AddCard(x, y, cardW, cardH, maxed ? muted : broke ? new Color(.5f, .5f, .55f) : stroke, "lbuy" + id, .94f);
-        AddPanel(x + 10, y + 12, 38, 38, new Color(1, 1, 1, .06f), uiRoot, "layout-buy-icon-bg");
-        AddUIImage("layout-buy-icon-" + id, LayoutBuySprite(id), x + 12, y + 14, 34, 34, maxed ? new Color(1, 1, 1, .4f) : Color.white);
-        AddText(LayoutBuyTitle(id), x + 56, y + 22, 12, maxed ? muted : text, FontStyle.Bold, TextAnchor.MiddleLeft, "layout-buy-title");
-        AddText(isRoom ? save.room + "/2" : OwnedCount(id) + "/" + MaxOwned(id), x + 56, y + 42, 9, muted, FontStyle.Bold, TextAnchor.MiddleLeft, "layout-buy-count");
-        Color pc = maxed ? muted : broke ? red : gold;
-        AddPanel(x + cardW - 62, y + 17, 52, 24, new Color(pc.r, pc.g, pc.b, .18f), uiRoot, "layout-buy-price-bg");
-        AddText(maxed ? "MAX" : cost.ToString(), x + cardW - 36, y + 29, 12, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "layout-buy-cost");
+        // Invisible hit layer, not AddButton — AddButton paints a coloured stroke, which is what put
+        // a border round every card. Same treatment as the studio cards: the accent lives behind the
+        // icon, the card itself stays calm.
+        if (!maxed && !broke) {
+            var hit = new GameObject("layout-buy-" + id, typeof(Image), typeof(Button));
+            hit.transform.SetParent(uiRoot, false);
+            var hi = hit.GetComponent<Image>();
+            hi.sprite = RushhouseUIKit.Rounded(18); hi.type = Image.Type.Sliced;
+            hi.color = new Color(1, 1, 1, 0f); hi.raycastTarget = true;
+            Place(hit.GetComponent<RectTransform>(), x, y, cardW, cardH);
+            var hb = hit.GetComponent<Button>();
+            hb.transition = Selectable.Transition.None;
+            hb.onClick.AddListener(() => action?.Invoke());
+            RushhouseUIPress.Attach(hit);
+        }
+        Surface(x, y, cardW, cardH, maxed ? new Color(.11f, .13f, .16f) : RushhouseUIKit.SurfaceHi,
+                18, !maxed, "lbuy" + id);
+        Surface(x + 12, y + 14, 44, 44, new Color(stroke.r, stroke.g, stroke.b, maxed ? .10f : .22f), 14, false, "layout-buy-icon-bg");
+        AddUIImage("layout-buy-icon-" + id, LayoutBuySprite(id), x + 16, y + 18, 36, 36, maxed ? new Color(1, 1, 1, .4f) : Color.white);
+        AddText(LayoutBuyTitle(id), x + 68, y + 28, 13, maxed ? RushhouseUIKit.Muted : RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "layout-buy-title");
+        AddText(isRoom ? save.room + "/2" : OwnedCount(id) + "/" + MaxOwned(id), x + 68, y + 48, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "layout-buy-count");
+        Color pc = maxed ? RushhouseUIKit.Muted : broke ? RushhouseUIKit.Danger : RushhouseUIKit.Gold;
+        Surface(x + cardW - 72, y + 23, 60, 26, new Color(pc.r, pc.g, pc.b, .16f), 13, false, "layout-buy-price-bg");
+        AddText(maxed ? "MAX" : cost.ToString(), x + cardW - 42, y + 32, 13, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "layout-buy-cost");
     }
 
     Sprite LayoutBuySprite(string id)
