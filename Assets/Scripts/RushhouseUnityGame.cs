@@ -1320,8 +1320,8 @@ public class RushhouseUnityGame : MonoBehaviour
         Place(label.GetComponent<RectTransform>(), 486, 1130, 180, 40);
         actLabelGo = label;
         // zoom +/- buttons (persistent so their onClick survives the per-tick UI rebuild), right edge
-        MakeZoomButton("zoom-in", "+", 636, 300, () => SetZoom(camZoom + .18f));
-        MakeZoomButton("zoom-out", "-", 636, 366, () => SetZoom(camZoom - .18f));
+        MakeZoomButton("zoom-in", "+", 636, 432, () => SetZoom(camZoom + .18f));
+        MakeZoomButton("zoom-out", "-", 636, 498, () => SetZoom(camZoom - .18f));
         touchRoot.SetActive(false);
     }
 
@@ -1725,38 +1725,59 @@ public class RushhouseUnityGame : MonoBehaviour
         var blocker = new GameObject("hud-blocker", typeof(Image));
         blocker.transform.SetParent(uiRoot, false);
         blocker.GetComponent<Image>().color = new Color(0, 0, 0, 0);
-        Place(blocker.GetComponent<RectTransform>(), 0, 0, W, 224);
-        // ---- modern status bar: one flat surface, big centred clock, stat chips either side ----
-        AddPanel(0, 0, W, 96, new Color(.045f, .06f, .085f, .96f), uiRoot, "hud-bar");
-        AddPanel(0, 94, W, 2, new Color(1, 1, 1, .08f), uiRoot, "hud-bar-edge");
-        // left: day + service progress + stars
-        AddText("DAY " + save.day, 26, 30, 20, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText(served + "/" + goal, 26, 60, 15, mint, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText("SERVED", 74, 61, 11, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-        DrawStarPips(26, 76, 9);
-        // centre: the clock is the primary readout
-        Color timeCol = shiftTime <= 30f ? red : shiftTime <= 60f ? gold : text;
-        AddText(FormatTime(shiftTime), 360, 36, 30, timeCol, FontStyle.Bold);
-        AddText("$" + earned, 360, 68, 15, gold, FontStyle.Bold);
-        // right: flow + complaints as compact chips, clear of the MENU button
+        Place(blocker.GetComponent<RectTransform>(), 0, 0, W, 176);   // status rows only; the cards below hit-test themselves
+        // ---- status bar, same system as the menu -------------------------------------------------
+        // Three floating rounded cards rather than one full-bleed slab with a hairline under it.
+        // A bar that spans edge to edge reads as chrome bolted onto the game; separated cards with
+        // a margin read as HUD floating over it, and they give the clock its own frame so the most
+        // important number is not competing with the day counter for the same surface.
+        // 8pt grid: 24 margin, 16 gutters, 208/224/208 across the 672 content width.
+        const int HM = 24, HGap = 16, HY = 24, HH = 88;
+        int wSide = 208, wMid = 224;
+        int xMid = HM + wSide + HGap, xRight = xMid + wMid + HGap;
+
+        Surface(HM, HY, wSide, HH, RushhouseUIKit.Surface, 20, true, "hud-left");
+        AddText("DAY " + save.day, HM + 20, HY + 30, 22, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "hud-day");
+        AddText(served + "/" + goal, HM + 20, HY + 58, 15, RushhouseUIKit.Teal, FontStyle.Bold, TextAnchor.MiddleLeft, "hud-served");
+        AddText("SERVED", HM + 68, HY + 59, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "hud-servedlab");
+        DrawStarPips(HM + 20, HY + 70, 9);
+
+        // The clock is the primary readout, so it gets the centre card and the largest type.
+        Color timeCol = shiftTime <= 30f ? RushhouseUIKit.Danger : shiftTime <= 60f ? RushhouseUIKit.Gold : RushhouseUIKit.Ink;
+        Surface(xMid, HY, wMid, HH, RushhouseUIKit.Surface, 20, true, "hud-mid");
+        AddText(FormatTime(shiftTime), xMid + wMid / 2, HY + 34, 32, timeCol, FontStyle.Bold, TextAnchor.MiddleCenter, "hud-clock");
+        AddText("$" + earned, xMid + wMid / 2, HY + 66, 15, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "hud-earned");
+
+        // MENU is a VISUAL only — MenuHotspot toggles pause on pointer-DOWN. It must NOT also be a
+        // Button: its onClick fired on pointer-UP and immediately un-paused ("hold to keep it open").
+        Surface(xRight, HY, wSide, HH, RushhouseUIKit.SurfaceHi, 20, true, "play-menu");
+        var menuLabel = AddText("MENU", xRight + wSide / 2, HY + HH / 2, 18, RushhouseUIKit.Ink, FontStyle.Bold,
+                                TextAnchor.MiddleCenter, "play-menu-label");
+        menuLabel.raycastTarget = false;
+
+        // ---- second row: only what is currently true ---------------------------------------------
+        // Pills appear as they become relevant and are laid out left to right in that order, so the
+        // row never has holes in it the way fixed slots did.
         bool queueHot = queue >= queueMax - 1 && queue > 0;
-        AddChip(392, 18, 116, 28, queueHot ? red : mint, "hud-queue", .16f);
-        AddText(queue > 0 ? "QUEUE " + queue + "/" + queueMax : "NEXT " + Mathf.CeilToInt(spawnTimer) + "s", 404, 32, 12, queueHot ? red : mint, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddChip(392, 52, 116, 28, complaints > 0 ? red : muted, "hud-compl", .16f);
-        AddText("FAILS " + complaints + "/5", 404, 66, 12, complaints > 0 ? red : muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-        if (combo >= 2) {
-            Color cc = Color.Lerp(gold, red, Mathf.Clamp01((combo - 2) / 9f));
-            AddChip(170, 22, 108, 26, cc, "hud-combo", .2f);
-            AddText("COMBO x" + combo, 182, 35, 13, cc, FontStyle.Bold, TextAnchor.MiddleLeft);
+        int pillY = HY + HH + HGap, pillH = 44, px2 = HM;
+        void Pill(string label, Color tint, int pw) {
+            // Opaque, because these float over the room: a translucent tint disappears the instant
+            // the floor behind them is bright, which is exactly when FAILS matters most.
+            Surface(px2, pillY, pw, pillH, RushhouseUIKit.Surface, 22, true, "hud-pill");
+            Surface(px2 + 12, pillY + 12, 4, pillH - 24, tint, 2, false, "hud-pill-edge");
+            AddText(label, px2 + pw / 2 + 8, pillY + pillH / 2, 13, tint, FontStyle.Bold, TextAnchor.MiddleCenter, "hud-pill-label");
+            px2 += pw + 8;
         }
+        Pill(queue > 0 ? "QUEUE " + queue + "/" + queueMax : "NEXT " + Mathf.CeilToInt(spawnTimer) + "s",
+             queueHot ? RushhouseUIKit.Danger : RushhouseUIKit.Teal, 176);
+        Pill("FAILS " + complaints + "/5", complaints > 0 ? RushhouseUIKit.Danger : RushhouseUIKit.Muted, 152);
+        if (combo >= 2)
+            Pill("COMBO x" + combo, Color.Lerp(RushhouseUIKit.Gold, RushhouseUIKit.Danger,
+                 Mathf.Clamp01((combo - 2) / 9f)), 168);
+
         DrawTicketHud();
         DrawGoalHud();
         DrawOrderDetail();
-        // MENU is a VISUAL only — MenuHotspot toggles pause on pointer-DOWN. It must NOT also be a
-        // Button: its onClick fired on pointer-UP and immediately un-paused ("hold to keep it open").
-        AddCard(528, 14, 168, 68, mint, "play-menu", .95f);
-        var menuLabel = AddText("MENU", 612, 50, 18, text, FontStyle.Bold);
-        menuLabel.raycastTarget = false;
         DrawTutorialHud();
         // day modifiers (special / event / rush) now live inside the GOALS card — see DrawGoalHud
         // suppress the generic HOLD label while the plate-guide is showing NEXT step (avoids overlap)
@@ -1839,24 +1860,26 @@ public class RushhouseUnityGame : MonoBehaviour
     {
         // Order queue as tappable ticket cards: dish thumb, name, a real patience bar. Sized so up to
         // three tickets plus an overflow line always fit inside the card.
-        const int tx = 20, tw = 276, rowH = 44;   // stops short of the centre sight-line (x 296..424)
+        // Grid: 24 margin, two 328 columns with a 16 gutter. Sits BELOW the status cards and the
+        // pill row (which end at 172) rather than overlapping them as it used to.
+        const int tx = 24, tw = 328, rowH = 44, topY = 188;
         var allActive = customers.Where(c => c.ordered && !c.served).OrderBy(c => c.patience).ToList();
         var active = allActive.Take(allActive.Count > 3 ? 2 : 3).ToList();
         int bodyH = Mathf.Max(1, active.Count) * rowH + (allActive.Count > active.Count ? 20 : 0);
-        AddCard(tx, 104, tw, 40 + bodyH + 10, gold, "tickets", .93f);
-        AddText("ORDERS", tx + 18, 130, 13, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText(allActive.Count.ToString(), tx + tw - 18, 130, 13, muted, FontStyle.Bold, TextAnchor.MiddleRight);
+        Surface(tx, topY, tw, 40 + bodyH + 10, RushhouseUIKit.Surface, 20, true, "tickets");
+        AddText("ORDERS", tx + 18, topY + 26, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft);
+        AddText(allActive.Count.ToString(), tx + tw - 18, topY + 26, 13, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleRight);
         ticketRows.Clear();
         if (active.Count == 0) {
-            AddText("Waiting for orders...", tx + 18, 168, 12, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
+            AddText("Waiting for orders...", tx + 18, topY + 64, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft);
             return;
         }
-        int y = 148;
+        int y = topY + 44;
         foreach (var c in active) {
             bool low = c.patience < c.maxPatience * .3f;
             Color tone = low ? red : c.typeId == "critic" ? violet : mint;
             ticketRows.Add((new Rect(tx + 8, y, tw - 16, rowH - 4), c.recipe));   // tap zone -> recipe detail
-            AddChip(tx + 8, y, tw - 16, rowH - 6, tone, "tk" + y, .1f);
+            Surface(tx + 8, y, tw - 16, rowH - 6, new Color(tone.r, tone.g, tone.b, .13f), 12, false, "tk" + y);
             AddUIImage("ticket-icon-" + c.recipe.id + "-" + y, FinalDishSprite(c.recipe.id), tx + 16, y + 3, 32, 32, Color.white);
             string mark = c.typeId == "critic" ? "! " : specialRecipe != null && c.recipe.id == specialRecipe.id ? "* " : "";
             string line = mark + c.recipe.label + (c.partySize > 1 ? " x" + c.partySize : "") + (c.wantsDrink && !c.drinkServed ? " +DR" : "");
@@ -1975,16 +1998,16 @@ public class RushhouseUnityGame : MonoBehaviour
         // The day's modifiers (special dish, event, rush) ride ALONG THE TOP of this same card.
         // They used to float as centred badges over the room, which put them squarely across the
         // entrance arch — the one thing that must stay readable, since that is where guests appear.
-        const int gx = 424, gw = 276, rowH = 30, modH = 26;   // right of the centre sight-line
+        const int gx = 368, gw = 328, rowH = 30, modH = 26, topY = 188;   // right column of the same grid
         var goals = dailyGoals.Take(3).ToList();
         var mods = DayModifiers();
-        AddCard(gx, 104, gw, 40 + mods.Count * modH + goals.Count * rowH + 10, mint, "goals", .93f);
-        AddText("GOALS", gx + 18, 130, 13, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
+        Surface(gx, topY, gw, 40 + mods.Count * modH + goals.Count * rowH + 10, RushhouseUIKit.Surface, 20, true, "goals");
+        AddText("GOALS", gx + 18, topY + 26, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft);
         int done = goals.Count(g => g.done);
-        AddText(done + "/" + goals.Count, gx + gw - 18, 130, 13, done == goals.Count && goals.Count > 0 ? mint : muted, FontStyle.Bold, TextAnchor.MiddleRight);
-        int y = 148;
+        AddText(done + "/" + goals.Count, gx + gw - 18, topY + 26, 13, done == goals.Count && goals.Count > 0 ? RushhouseUIKit.Teal : RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleRight);
+        int y = topY + 44;
         foreach (var m in mods) {
-            AddChip(gx + 14, y, gw - 28, modH - 4, m.Value, "goal-mod", .15f);
+            Surface(gx + 14, y, gw - 28, modH - 4, new Color(m.Value.r, m.Value.g, m.Value.b, .16f), 10, false, "goal-mod");
             AddPanel(gx + 14, y, 4, modH - 4, m.Value, uiRoot, "goal-mod-edge");
             AddText(m.Key, gx + 28, y + (modH - 4) / 2, 11, m.Value, FontStyle.Bold, TextAnchor.MiddleLeft);
             y += modH;
