@@ -34,6 +34,28 @@ public class RushhouseUIPop : MonoBehaviour
         p.delay = delay; p.fromOffset = fromOffset; p.fromScale = fromScale; p.duration = duration;
     }
 
+    /// <summary>
+    /// Snap every running entrance to its finished state.
+    ///
+    /// Needed because these start at alpha 0 and only resolve over subsequent Updates. A one-frame
+    /// screenshot therefore captures an EMPTY screen -- which is exactly what happened: the studio
+    /// screen looked broken and was fine, while earlier captures only looked right because the
+    /// token guard happened to skip the animation on those screens. A verification harness that
+    /// silently photographs the wrong thing is worse than none, so the captures call this first.
+    /// </summary>
+    public static void FinishAll()
+    {
+        foreach (var pop in UnityEngine.Object.FindObjectsByType<RushhouseUIPop>(FindObjectsSortMode.None))
+            pop.Snap();
+    }
+
+    void Snap()
+    {
+        if (rt) { rt.anchoredPosition = home; rt.localScale = Vector3.one; }
+        if (cg) cg.alpha = 1f;
+        DestroyImmediate(this);
+    }
+
     void Awake()
     {
         rt = GetComponent<RectTransform>();

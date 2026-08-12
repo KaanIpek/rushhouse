@@ -1534,6 +1534,27 @@ public class RushhouseUnityGame : MonoBehaviour
         AddText(save.coins.ToString(), W - M - 24, 78, 22, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "st-coins");
         BuildStudioTabs();
         BuildShop(shopTab);
+
+        // What the upgrades are actually upgrading. The cards say "prep +0", which is honest and
+        // meaningless on its own; seeing the current levels together is what makes a purchase feel
+        // like a decision rather than a guess. Named "studio-*" so a tab switch (which wipes
+        // "shop-*") leaves it alone -- these levels do not change per tab.
+        int statsY = 760;
+        AddText("YOUR RESTAURANT", M, statsY, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "studio-stats-title");
+        (string, int)[] stats = {
+            ("SPEED", save.speed), ("COOK", save.grill), ("PREP", save.prepUpgrade),
+            ("WASH", save.sinkUpgrade), ("COMFORT", save.patience), ("FLOW", save.marketing)
+        };
+        int sw = (CW - 40) / 3;
+        for (int i = 0; i < stats.Length; i++) {
+            int sx = M + (i % 3) * (sw + 20), sy = statsY + 24 + (i / 3) * 76;
+            Surface(sx, sy, sw, 64, RushhouseUIKit.Surface, 16, false, "studio-stat" + i);
+            AddText(stats[i].Item1, sx + sw / 2, sy + 22, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "studio-stat-lab" + i);
+            AddText("Lv " + stats[i].Item2, sx + sw / 2, sy + 44, 16,
+                    stats[i].Item2 > 0 ? RushhouseUIKit.Teal : RushhouseUIKit.Muted, FontStyle.Bold,
+                    TextAnchor.MiddleCenter, "studio-stat-val" + i);
+        }
+
         SolidButton("BACK", M, 1176, CW, 72, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, ShowMenu, "st-back", 18);
         AnimateUIIn("studio");
     }
@@ -1582,6 +1603,7 @@ public class RushhouseUnityGame : MonoBehaviour
             if (Application.isPlaying) Destroy(child.gameObject);
             else DestroyImmediate(child.gameObject);
         }
+        shopAffordable.Clear();   // refilled as cards draw; MarkBestBuy consumes it below
         // Two columns across the same 40px margins as everything else. No section caption: the
         // active segment above already says which tab this is, and repeating it was pure noise.
         int leftX = 32;
@@ -1589,28 +1611,50 @@ public class RushhouseUnityGame : MonoBehaviour
         if (tab == "upgrades") {
             AddShopCard("SHOES", "move +" + save.speed, Cost(90, save.speed), leftX, 232, mint, () => BuyUpgrade("speed"));
             AddShopCard("HOB", "cook +" + save.grill, Cost(110, save.grill), rightX, 232, red, () => BuyUpgrade("grill"));
-            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 320, green, () => BuyUpgrade("prep"));
-            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 320, blue, () => BuyUpgrade("patience"));
-            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 408, mint, () => BuyUpgrade("sink"));
-            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 408, gold, () => BuyUpgrade("room"));
-            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 496, violet, () => BuyUpgrade("decor"));
-            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 496, green, () => BuyUpgrade("marketing"));
+            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 352, green, () => BuyUpgrade("prep"));
+            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 352, blue, () => BuyUpgrade("patience"));
+            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 472, mint, () => BuyUpgrade("sink"));
+            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 472, gold, () => BuyUpgrade("room"));
+            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 592, violet, () => BuyUpgrade("decor"));
+            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 592, green, () => BuyUpgrade("marketing"));
         } else if (tab == "equipment") {
             AddShopCard("COUNTER", $"floor {Math.Min(OwnedCount("counter"), MaxOwned("counter"))}/{MaxOwned("counter")}", EquipmentCost("counter"), leftX, 232, violet, () => BuyEquipment("counter"), OwnedCount("counter") >= MaxOwned("counter"));
             AddShopCard("TABLE", $"floor {Math.Min(save.table, MaxOwned("table"))}/{MaxOwned("table")}", EquipmentCost("table"), rightX, 232, gold, () => BuyEquipment("table"), save.table >= MaxOwned("table"));
-            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 320, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
-            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 320, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
-            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 408, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
+            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 352, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
+            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 352, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
+            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 472, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
             if (save.theme == "pizza")
-                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 408, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
+                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 472, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
             else if (save.theme == "coffee")
-                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 408, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
+                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 472, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
         } else {
             AddShopCard("WAITER", "takes orders + serves", StaffCost(save.waiter), leftX, 232, gold, () => BuyStaff("waiter"), save.waiter >= 3);
-            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 320, red, () => BuyStaff("cook"), save.cook >= 3);
-            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 408, blue, () => BuyStaff("washer"), save.washer >= 3);
+            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 352, red, () => BuyStaff("cook"), save.cook >= 3);
+            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 472, blue, () => BuyStaff("washer"), save.washer >= 3);
             AddShopCard("PREPPER", "chops + plates", StaffCost(save.prepper), rightX, 232, green, () => BuyStaff("prepper"), save.prepper >= 3);
         }
+        MarkBestBuy();
+    }
+
+    // Affordable cards recorded during a shop draw, so the cheapest can be flagged afterwards.
+    readonly List<(int cost, int x, int y, int w)> shopAffordable = new List<(int, int, int, int)>();
+
+    /// <summary>
+    /// Badge the cheapest thing the player can actually buy.
+    ///
+    /// Affordability needs to be POSITIVE, not just an absence. Greying out what is unaffordable
+    /// leaves a wall of dim cards and no answer to "so what can I do now"; pointing at the one in
+    /// reach gives somewhere to go the moment any coins are earned.
+    /// </summary>
+    void MarkBestBuy()
+    {
+        if (shopAffordable.Count == 0) return;
+        var best = shopAffordable[0];
+        foreach (var c in shopAffordable) if (c.cost < best.cost) best = c;
+        Surface(best.x + best.w - 100, best.y + 12, 88, 24,
+                new Color(RushhouseUIKit.Teal.r, RushhouseUIKit.Teal.g, RushhouseUIKit.Teal.b, .24f), 12, false, "shop-best-bg");
+        AddText("BEST BUY", best.x + best.w - 56, best.y + 23, 10, RushhouseUIKit.Teal, FontStyle.Bold,
+                TextAnchor.MiddleCenter, "shop-best");
     }
 
     void AddShopCard(string title, string desc, int cost, int x, int y, Color stroke, Action action, bool soldOut = false)
@@ -1618,7 +1662,7 @@ public class RushhouseUnityGame : MonoBehaviour
         // Soft elevated card, no stroke. The old version leaned on a coloured border to tell cards
         // apart, which is exactly the framed look being removed; the accent now lives in a small
         // colour bar behind the icon so the card itself stays calm.
-        const int cardW = 308, cardH = 72;
+        const int cardW = 308, cardH = 104;
         bool broke = !soldOut && save.coins < cost;
         if (!soldOut && !broke) {
             var hit = new GameObject("shop-card", typeof(Image), typeof(Button));
@@ -1635,18 +1679,22 @@ public class RushhouseUnityGame : MonoBehaviour
         Surface(x, y, cardW, cardH, soldOut ? new Color(.11f, .13f, .16f) : RushhouseUIKit.SurfaceHi,
                 18, !soldOut, "shop" + title);
         Color iconTint = soldOut ? new Color(1, 1, 1, .3f) : broke ? new Color(1, 1, 1, .55f) : Color.white;
-        Surface(x + 12, y + 12, 44, 44, new Color(stroke.r, stroke.g, stroke.b, soldOut ? .10f : .22f), 14, false, "shop-icon-bg");
-        AddUIImage("shop-icon-" + title, ShopIconSprite(title), x + 16, y + 16, 36, 36, iconTint, true);
-        AddText(title, x + 68, y + 26, 15, soldOut ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
+        Surface(x + 14, y + 18, 68, 68, new Color(stroke.r, stroke.g, stroke.b, soldOut ? .10f : .22f), 18, false, "shop-icon-bg");
+        AddUIImage("shop-icon-" + title, ShopIconSprite(title), x + 20, y + 24, 56, 56, iconTint, true);
+        AddText(title, x + 96, y + 38, 17, soldOut ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
                 FontStyle.Bold, TextAnchor.MiddleLeft, "shop-title");
-        AddText(desc, x + 68, y + 48, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-desc");
+        AddText(desc, x + 96, y + 62, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-desc");
+        // Record affordable cards so the cheapest can be badged AFTER the grid is laid out. Doing
+        // it inline is impossible -- a card cannot know it is the cheapest until the others exist --
+        // and recomputing the prices in a second place would silently drift from these ones.
+        if (!soldOut && !broke) shopAffordable.Add((cost, x, y, cardW));
         if (soldOut) DrawSoldOutBadge(x, y, cardW, cardH);
         else {
             // Price pill: gold when affordable, red when not — the only feedback an inert card gets.
             Color pc = broke ? RushhouseUIKit.Danger : RushhouseUIKit.Gold;
             int pw = 68;
-            Surface(x + cardW - pw - 12, y + 21, pw, 26, new Color(pc.r, pc.g, pc.b, .16f), 13, false, "shop-price-bg");
-            AddText(cost.ToString(), x + cardW - 12 - pw / 2, y + 30, 14, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-cost");
+            Surface(x + cardW - pw - 14, y + 56, pw, 30, new Color(pc.r, pc.g, pc.b, .16f), 15, false, "shop-price-bg");
+            AddText(cost.ToString(), x + cardW - 14 - pw / 2, y + 67, 15, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-cost");
         }
     }
 

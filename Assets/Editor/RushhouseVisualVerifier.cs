@@ -158,6 +158,8 @@ public static class RushhouseVisualVerifier
         }
         Canvas.ForceUpdateCanvases();
 
+        RushhouseUIPop.FinishAll();
+
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-editor-world-after-fix.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -192,6 +194,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-wardrobe.png"), 540, 960);
         EditorApplication.Exit(have == 10 ? 0 : 1);
     }
@@ -210,6 +213,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-adoffer.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -345,6 +349,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-staff.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -412,6 +417,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-settings.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -435,6 +441,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-pause.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -466,6 +473,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-orderdetail.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -535,6 +543,7 @@ public static class RushhouseVisualVerifier
         type.GetMethod("BuildPlayUI", flags)?.Invoke(game, null);
         type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-door.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -572,6 +581,7 @@ public static class RushhouseVisualVerifier
         var fcanvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (fcanvas) { fcanvas.renderMode = RenderMode.ScreenSpaceCamera; fcanvas.sortingOrder = 500; fcanvas.worldCamera = Camera.main; fcanvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-fire.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -601,7 +611,41 @@ public static class RushhouseVisualVerifier
         }
         Canvas.ForceUpdateCanvases();
 
+        RushhouseUIPop.FinishAll();
+
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-result-perks.png"), 540, 960);
+        EditorApplication.Exit(0);
+    }
+
+    // The studio moved off the menu onto its own screen, and a screen with no capture is a screen
+    // nobody has actually looked at.
+    public static void CaptureStudio()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        if (!game) throw new Exception("RushhouseUnityGame not found");
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+        object save = type.GetField("save", flags)?.GetValue(game);
+        if (save != null) {
+            Type st = save.GetType();
+            st.GetField("day")?.SetValue(save, 4);
+            st.GetField("coins")?.SetValue(save, 340);   // deliberately mid-range: some cards affordable, some not
+        }
+        type.GetMethod("ShowStudio", flags)?.Invoke(game, null);
+        // A ScreenSpaceOverlay canvas is invisible to a render-texture capture, so it has to be
+        // pointed at the camera first. Leaving this out is why the studio screen photographed black
+        // while being perfectly fine in game.
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) {
+            canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500;
+            canvas.worldCamera = Camera.main;
+            canvas.planeDistance = 1f;
+        }
+        Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
+        CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-studio.png"), 540, 960);
         EditorApplication.Exit(0);
     }
 
@@ -633,6 +677,8 @@ public static class RushhouseVisualVerifier
         }
         Canvas.ForceUpdateCanvases();
 
+        RushhouseUIPop.FinishAll();
+
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-menu.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -654,6 +700,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-recipes.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -683,6 +730,7 @@ public static class RushhouseVisualVerifier
             var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
             if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
             Canvas.ForceUpdateCanvases();
+            RushhouseUIPop.FinishAll();
             CaptureCamera(Path.Combine(WorkspaceWorkDir(), name), 540, 960);
         }
 
@@ -740,6 +788,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-party.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -785,6 +834,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-service.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -815,6 +865,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-result-stats.png"), 540, 960);
         EditorApplication.Exit(0);
     }
@@ -857,6 +908,7 @@ public static class RushhouseVisualVerifier
         var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
         if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
         Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
         CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-bowl.png"), 540, 960);
         EditorApplication.Exit(0);
     }
