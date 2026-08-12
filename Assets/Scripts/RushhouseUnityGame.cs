@@ -2103,18 +2103,21 @@ public class RushhouseUnityGame : MonoBehaviour
         // Corners: the "cornerwall" asset never read as a corner from this angle (it perched above the
         // wall line like a floating post). A plain column in the wall's own material seals the join
         // cleanly and always faces correctly.
-        Material cornerMat = WorldMaterial("corner-col", null, new Color(.52f, .35f, .21f), Vector2.one);
-        // The corner must SPAN the gap, not sit in the middle of it. The back modules only begin at
-        // all.xMin + cornerSpan, and the old 0.42-wide column reached just xMin+0.19 -- leaving a
-        // 0.58-wide hole at full wall height at BOTH ends of the storefront. That hole, plus a pale
-        // 0.5x0.5 "corner-cap" slab floating at lift 1.09 (above the 1.0/1.05 wall tops, in a lighter
-        // colour, its top face turned to camera), is what read as the broken wall either side of the
-        // entrance. The cap is gone -- the column's own top already lands at 1.06, flush with the
-        // back modules -- and the column now runs from the side wall's outer face to the first module.
+        // Use the cornerwall MODEL from the kit, not a plain coloured box. The old code fell back to
+        // a box because the asset "perched above the wall line like a floating post" -- but that was
+        // a fit problem, not the asset's fault: MakeArchitecturalModel grounds to the mesh's own
+        // min.y, so a corner squeezed into a narrow span reads as a post. Given the real span it has
+        // to fill, and the same 1.05 height as the back modules, it sits in the wall line properly.
+        //
+        // The span matters: the back modules only begin at all.xMin + cornerSpan, and the previous
+        // 0.42-wide column reached just xMin+0.19, leaving a 0.58-wide hole at full wall height at
+        // BOTH ends of the storefront. That hole -- plus a pale corner-cap slab floating above the
+        // wall tops -- is what read as the broken wall either side of the entrance.
         float cornerW = cornerSpan + .3f;
         for (int s = 0; s < 2; s++) {
             float cxp = s == 0 ? all.xMin + cornerSpan * .5f - .12f : all.xMax - cornerSpan * .5f + .12f;
-            MakeBox3D("corner-col-" + s, new Vector2(cxp, backY - .02f), new Vector2(cornerW, .42f), 1.06f, cornerMat, .53f, true);
+            MakeArchitecturalModel("corner-wall-" + s, "cornerwall", new Vector2(cxp, backY),
+                                   cornerW, .3f, 1.05f, 0f);
         }
         MakeArchitecturalModel("entrance-gate", "gate", new Vector2(0f, backY - .035f), backPiece * .72f, .14f, .9f, 0f);
         var pictureFrame = MakeArchitecturalModel("back-picture-frame", "frame",
