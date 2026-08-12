@@ -914,7 +914,11 @@ public class RushhouseUnityGame : MonoBehaviour
     // A consistent "watch an ad for X" button. Purple so it never reads as a normal action.
     void AddAdButton(string label, int x, int y, int w, int h, string kind, Action redraw, string name)
     {
-        AddIconButton(label, "ic_open", x, y, w, h, violet, () => WatchAd(kind, redraw), name);
+        // Rewarded ads are opt-in and should read as a gift, not a warning: solid violet surface on
+        // the shared kit rather than AddIconButton, whose stroke was leaving a hard coloured bar
+        // across the top of the only button on the screen that is genuinely optional.
+        SolidButton(label, x, y, w, h, new Color(violet.r * .55f, violet.g * .5f, violet.b * .78f, 1f),
+                    Color.white, () => WatchAd(kind, redraw), name, 16);
     }
 
     // ---- cosmetics ------------------------------------------------------------------------
@@ -4882,56 +4886,76 @@ public class RushhouseUnityGame : MonoBehaviour
     {
         lastResultSuccess = success;
         ClearUI();
-        AddPanel(0, 0, W, H, new Color(.03f, .035f, .05f, 1), uiRoot, "result-bg");
+        AddPanel(0, 0, W, H, RushhouseUIKit.Bg, uiRoot, "result-bg");
         if (pendingPerks.Count > 0) { DrawPerkChoice(); return; }
-        Color tone = success ? mint : red;
-        if (messageTimer > 0) AddText(message, 360, 60, 13, gold, FontStyle.Bold);
-        // hero: outcome + the day's star rating as pips (a "***" string reads as debris at this size)
-        AddText(success ? "DAY COMPLETE" : "SERVICE FAILED", 360, 104, 38, tone, FontStyle.Bold);
-        AddText("DAY " + (success ? save.day - 1 : save.day), 360, 142, 14, muted, FontStyle.Bold);
+
+        // LAYERED, because the two audiences want different things: most players read the stars and
+        // leave, a few read every number. So the outcome and the payout are large and immediate, the
+        // three headline stats are glanceable tiles, and the bookkeeping sits in one quiet card
+        // underneath instead of eight equal rows where nothing was the answer.
+        const int M = 32, CW = W - M * 2;
+        Color tone = success ? RushhouseUIKit.Teal : RushhouseUIKit.Danger;
+        if (messageTimer > 0) AddText(message, W / 2, 40, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "res-msg");
+
+        AddText(success ? "DAY COMPLETE" : "SERVICE FAILED", W / 2, 96, 40, tone, FontStyle.Bold, TextAnchor.MiddleCenter, "res-title");
+        AddText("DAY " + (success ? save.day - 1 : save.day), W / 2, 134, 14, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-day");
+
+        // Stars: earned ones filled and gold, the rest left as empty sockets. Showing the unearned
+        // slots is the point -- it is what makes two out of three read as "one more to get".
         for (int i = 0; i < 3; i++) {
             bool on = i < starRating;
-            int px = 300 + i * 42;
-            AddPanel(px, 168, 32, 32, on ? new Color(1f, .8f, .25f, .95f) : new Color(1, 1, 1, .1f), uiRoot, "res-star");
-            if (on) AddPanel(px + 6, 174, 20, 20, new Color(1f, .93f, .62f, 1f), uiRoot, "res-star-in");
+            int sx = W / 2 - 108 + i * 76, sy = 166;
+            Surface(sx, sy, 60, 60, on ? new Color(1f, .78f, .22f, 1f) : new Color(1, 1, 1, .07f), 30, on, "res-star" + i);
+            if (on) Surface(sx + 12, sy + 12, 36, 36, new Color(1f, .93f, .66f, 1f), 18, false, "res-star-in" + i);
         }
 
-        const int cx = 56, cw = 608, pad = 20;
-        int ry = 224;
-        AddCard(cx, ry, cw, 46 + 8 * 32 + 12, tone, "res-stats");
-        AddText("SHIFT REPORT", cx + pad, ry + 26, 13, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        int rowY = ry + 52;
-        void Row(string k, string v, Color vc)
-        {
-            AddText(k, cx + pad, rowY + 14, 14, muted, FontStyle.Bold, TextAnchor.MiddleLeft, "result-row");
-            AddText(v, cx + cw - pad, rowY + 14, 15, vc, FontStyle.Bold, TextAnchor.MiddleRight, "result-row");
-            rowY += 32;
+        // The payout is the reward moment, so it is the biggest number on the screen.
+        int py = 254;
+        Surface(M, py, CW, 116, RushhouseUIKit.Surface, 24, true, "res-payout");
+        AddText("+" + earned, W / 2, py + 50, 46, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "res-earned");
+        AddText("COINS EARNED", W / 2, py + 88, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-earnedlab");
+
+        // Three glanceable tiles.
+        int tw = (CW - 24) / 3, ty = 394;
+        void Tile(int i, string label, string value, Color vc) {
+            int tx = M + i * (tw + 12);
+            Surface(tx, ty, tw, 92, RushhouseUIKit.Surface, 20, true, "res-tile" + i);
+            AddText(value, tx + tw / 2, ty + 36, 22, vc, FontStyle.Bold, TextAnchor.MiddleCenter, "res-tile-v" + i);
+            AddText(label, tx + tw / 2, ty + 66, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-tile-l" + i);
         }
-        Row("SERVED", served + " / " + goal, text);
-        Row("COINS EARNED", "+" + earned, gold);
-        Row("TIPS", "+" + tips, gold);
-        Row("BEST COMBO", "x" + bestCombo, bestCombo >= 3 ? gold : text);
-        Row("RESTAURANT STARS", save.stars + "/5" + (starDelta > 0 ? "   UP" : starDelta < 0 ? "   DOWN" : ""), starDelta > 0 ? mint : starDelta < 0 ? red : gold);
-        Row("REPUTATION", save.reputation.ToString(), mint);
-        Row("CAREER STARS", save.totalStars.ToString(), gold);
+        Tile(0, "SERVED", served + "/" + goal, served >= goal ? RushhouseUIKit.Teal : RushhouseUIKit.Ink);
+        Tile(1, "TIPS", "+" + tips, RushhouseUIKit.Gold);
+        Tile(2, "BEST COMBO", "x" + bestCombo, bestCombo >= 3 ? RushhouseUIKit.Gold : RushhouseUIKit.Ink);
+
+        // Progress + bookkeeping, quiet.
+        int gy0 = 510;
+        Surface(M, gy0, CW, 150, RushhouseUIKit.Surface, 20, false, "res-progress");
+        int rowY = gy0 + 34;
+        void Row(string k, string v, Color vc) {
+            AddText(k, M + 20, rowY, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-row");
+            AddText(v, M + CW - 20, rowY, 13, vc, FontStyle.Bold, TextAnchor.MiddleRight, "res-row");
+            rowY += 30;
+        }
+        Row("RESTAURANT STARS", save.stars + "/5" + (starDelta > 0 ? "   UP" : starDelta < 0 ? "   DOWN" : ""),
+            starDelta > 0 ? RushhouseUIKit.Teal : starDelta < 0 ? RushhouseUIKit.Danger : RushhouseUIKit.Gold);
+        Row("REPUTATION", save.reputation.ToString(), RushhouseUIKit.Teal);
         Row("WARDROBE TOKENS", (tokensEarnedToday > 0 ? "+" + tokensEarnedToday : "-") + "   (" + save.tokens + ")",
-            tokensEarnedToday > 0 ? violet : muted);
-        int y = ry + 46 + 8 * 32 + 12 + 16;
-        AddText("bonus " + goalBonus + "   drinks " + drinksServed + "   wrong " + wrongOrders + "   missed " + missed + "   queue " + queueComplaints,
-                360, y + 10, 11, muted, FontStyle.Bold);
-        y += 30;
+            tokensEarnedToday > 0 ? violet : RushhouseUIKit.Muted);
+        Row("MISSED / WRONG", missed + " / " + wrongOrders, (missed + wrongOrders) > 0 ? RushhouseUIKit.Danger : RushhouseUIKit.Muted);
 
-        // goals as a tick list, same language as the in-play GOALS card
-        AddCard(cx, y, cw, 44 + dailyGoals.Count * 28 + 10, gold, "res-goals");
-        AddText("DAILY GOALS", cx + pad, y + 26, 13, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        int gy = y + 48;
+        // Goals, same tick language as the in-play card.
+        int y = gy0 + 166;
+        Surface(M, y, CW, 40 + dailyGoals.Count * 28 + 8, RushhouseUIKit.Surface, 20, false, "res-goals");
+        AddText("DAILY GOALS", M + 20, y + 24, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-goals-t");
+        int gy = y + 50;
         foreach (var g in dailyGoals) {
-            AddPanel(cx + pad, gy + 4, 13, 13, g.done ? mint : new Color(1, 1, 1, .14f), uiRoot, "res-tick");
-            if (g.done) AddPanel(cx + pad + 3, gy + 7, 7, 7, new Color(.05f, .07f, .1f, 1f), uiRoot, "res-tick-in");
-            AddText(GoalLine(g), cx + pad + 26, gy + 11, 12, g.done ? mint : muted, FontStyle.Bold, TextAnchor.MiddleLeft);
+            Surface(M + 20, gy - 6, 14, 14, g.done ? RushhouseUIKit.Teal : new Color(1, 1, 1, .12f), 4, false, "res-tick");
+            AddText(GoalLine(g), M + 46, gy, 12, g.done ? RushhouseUIKit.Ink : RushhouseUIKit.Muted,
+                    FontStyle.Bold, TextAnchor.MiddleLeft, "res-goal");
             gy += 28;
         }
-        y += 44 + dailyGoals.Count * 28 + 10 + 20;
+        y += 40 + dailyGoals.Count * 28 + 8 + 16;
+        const int cx = M, cw = CW, pad = 20;
 
         if (success && marketOffers.Count > 0) {
             AddText("DAILY MARKET", cx + pad, y + 12, 18, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
@@ -4963,7 +4987,7 @@ public class RushhouseUnityGame : MonoBehaviour
                 () => DrawResultScreen(lastResultSuccess), "res-adtips");
             footY += 86;
         }
-        AddIconButton("CONTINUE", "ic_open", cx, footY, cw, 78, mint, ShowMenu, "res-continue");
+        SolidButton("CONTINUE", cx, footY, cw, 78, RushhouseUIKit.Primary, Color.white, ShowMenu, "res-continue", 22);
     }
 
     bool HasPerk(string id)
@@ -5005,32 +5029,43 @@ public class RushhouseUnityGame : MonoBehaviour
     void DrawPerkChoice()
     {
         // modern "choose one" sheet: headline, then one clean card per perk
-        AddText("NEW PERK", 360, 150, 40, gold, FontStyle.Bold);
-        AddText("Pick ONE permanent upgrade — it lasts every future shift", 360, 194, 13, muted, FontStyle.Bold);
-        const int px = 56, pw = 608, cardH = 140, gap = 18;
+        AddText("NEW PERK", W / 2, 150, 40, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "perk-title");
+        AddText("Pick ONE permanent upgrade - it lasts every future shift", W / 2, 194, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "perk-sub");
+        const int px = 32, pw = W - 64, cardH = 140, gap = 16;
         int listTop = 240;
         for (int i = 0; i < pendingPerks.Count; i++) {
             var perk = allPerks.First(p => p.id == pendingPerks[i]);
             int y = listTop + i * (cardH + gap);
             int idx = i;
-            Color accent = i == 0 ? gold : i == 1 ? mint : violet;
-            // hit area under the card art, so labels stay visible and the whole card is tappable
-            AddButton("", px, y, pw, cardH, accent, () => ChoosePerk(idx), "perk-card" + i);
-            AddCard(px, y, pw, cardH, accent, "perk" + i, .93f);
-            AddPanel(px + 22, y + 34, 72, 72, new Color(1, 1, 1, .07f), uiRoot, "perk-med" + i);
-            AddText((i + 1).ToString(), px + 58, y + 70, 32, accent, FontStyle.Bold, TextAnchor.MiddleCenter, "perk-num" + i);
-            AddText(perk.label, px + 112, y + 50, 23, text, FontStyle.Bold, TextAnchor.MiddleLeft, "perk-l" + i);
-            AddText(perk.desc, px + 112, y + 82, 14, accent, FontStyle.Bold, TextAnchor.MiddleLeft, "perk-d" + i);
-            AddText("TAP TO CHOOSE", px + 112, y + 112, 11, muted, FontStyle.Bold, TextAnchor.MiddleLeft, "perk-cta" + i);
+            Color accent = i == 0 ? RushhouseUIKit.Gold : i == 1 ? RushhouseUIKit.Teal : violet;
+            // Invisible hit layer, not AddButton: AddButton paints a stroke, which is what gave every
+            // perk a coloured bar across its top -- the framed look these cards were meant to lose.
+            var hit = new GameObject("perk-card" + i, typeof(Image), typeof(Button));
+            hit.transform.SetParent(uiRoot, false);
+            var hi = hit.GetComponent<Image>();
+            hi.sprite = RushhouseUIKit.Rounded(22); hi.type = Image.Type.Sliced;
+            hi.color = new Color(1, 1, 1, 0f); hi.raycastTarget = true;
+            Place(hit.GetComponent<RectTransform>(), px, y, pw, cardH);
+            var hb = hit.GetComponent<Button>();
+            hb.transition = Selectable.Transition.None;
+            hb.onClick.AddListener(() => ChoosePerk(idx));
+            RushhouseUIPress.Attach(hit);
+
+            Surface(px, y, pw, cardH, RushhouseUIKit.SurfaceHi, 22, true, "perk" + i);
+            Surface(px + 24, y + 34, 72, 72, new Color(accent.r, accent.g, accent.b, .18f), 20, false, "perk-med" + i);
+            AddText((i + 1).ToString(), px + 60, y + 70, 32, accent, FontStyle.Bold, TextAnchor.MiddleCenter, "perk-num" + i);
+            AddText(perk.label, px + 116, y + 52, 23, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "perk-l" + i);
+            AddText(perk.desc, px + 116, y + 84, 14, accent, FontStyle.Bold, TextAnchor.MiddleLeft, "perk-d" + i);
+            AddText("TAP TO CHOOSE", px + 116, y + 112, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "perk-cta" + i);
         }
         int footY = listTop + pendingPerks.Count * (cardH + gap) + 14;
         if (!perkRerollUsed) {
-            AddAdButton("WATCH AD:  REROLL THESE", px, footY, 608, 66, "reroll",
+            AddAdButton("WATCH AD:  REROLL THESE", px, footY, pw, 66, "reroll",
                 () => { perkRerollUsed = true; DrawResultScreen(lastResultSuccess); }, "perk-reroll");
             footY += 76;
         }
-        AddIconButton("SKIP", "ic_back", px + 174, footY, 260, 62, muted,
-            () => { pendingPerks.Clear(); DrawResultScreen(lastResultSuccess); }, "perk-skip");
+        SolidButton("SKIP", px + (pw - 260) / 2, footY, 260, 62, RushhouseUIKit.Surface, RushhouseUIKit.Muted,
+            () => { pendingPerks.Clear(); DrawResultScreen(lastResultSuccess); }, "perk-skip", 16);
     }
 
     void ChoosePerk(int idx)

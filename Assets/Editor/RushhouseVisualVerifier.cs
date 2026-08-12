@@ -619,6 +619,31 @@ public static class RushhouseVisualVerifier
 
     // The studio moved off the menu onto its own screen, and a screen with no capture is a screen
     // nobody has actually looked at.
+    // CaptureResultScreen always lands on the perk sheet, because a finished day offers one. This
+    // clears the pending perks first so the shift report itself can actually be looked at.
+    public static void CaptureResultNoPerks()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+        type.GetMethod("StartDay", flags)?.Invoke(game, null);
+        foreach (var f in new[] { "served", "earned", "tips", "bestCombo", "starRating", "missed", "wrongOrders" })
+            type.GetField(f, flags)?.SetValue(game, f == "starRating" ? 2 : f == "served" ? 7 : f == "earned" ? 184 : f == "tips" ? 32 : f == "bestCombo" ? 5 : 1);
+        (type.GetField("pendingPerks", flags)?.GetValue(game) as System.Collections.IList)?.Clear();
+        type.GetMethod("DrawResultScreen", flags)?.Invoke(game, new object[] { true });
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) {
+            canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500;
+            canvas.worldCamera = Camera.main; canvas.planeDistance = 1f;
+        }
+        Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
+        CaptureCamera(Path.Combine(WorkspaceWorkDir(), "unity-result.png"), 540, 960);
+        EditorApplication.Exit(0);
+    }
+
     public static void CaptureStudio()
     {
         RushhouseSceneBuilder.BuildMainScene();
