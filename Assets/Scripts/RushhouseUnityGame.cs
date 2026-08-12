@@ -2855,11 +2855,14 @@ public class RushhouseUnityGame : MonoBehaviour
         if (w == null || (w.carry == null && w.carryRecipe == null)) return;
         Vector2 hand = w.pos + CarryOffset(w.facing);
         int carryOrder = CarryDrawOrder(w.facing, 21);
+        spriteLift = .38f;                       // hand height, same reason as the player above
         if (w.carryRecipe != null) {
             DrawFinalDish(w.carryRecipe, hand, .25f, carryOrder);
+            spriteLift = 0f;
             return;
         }
         DrawHeld(w.carry, hand, .23f, true, carryOrder);
+        spriteLift = 0f;
     }
 
     void DrawPlayer()
@@ -2867,7 +2870,17 @@ public class RushhouseUnityGame : MonoBehaviour
         bool working = holdProgress > 0;
         string state = holding != null ? (playerWalking ? "carrywalk" : "carry") : working ? "act" : playerWalking ? "walk" : "idle";
         playerObj = DrawCharacter("player", PlayerSpriteName(), playerPos, new Vector2(1.05f, 1.5f), playerFacing, playerWalking, working, holding != null, false, 25, gold, state, Time.time);
-        if (holding != null) DrawHeld(holding, playerPos + CarryOffset(playerFacing), .46f, true, CarryDrawOrder(playerFacing, 25));
+        if (holding != null) {
+            // LIFT IT TO HAND HEIGHT. CarryOffset only shifts the item along the ground plane, so
+            // without a spriteLift the thing being carried was drawn at the character's FEET -- that
+            // is the burger that has been sitting on the kitchen floor in every screenshot. Station
+            // contents already do exactly this (see DrawAppliance); carried items never did.
+            // Size also dropped from .46 to .30: the player's held item was rendered at twice the
+            // staff's .23, which is what made a bun on the floor read as a whole burger.
+            spriteLift = .42f;
+            DrawHeld(holding, playerPos + CarryOffset(playerFacing), .30f, true, CarryDrawOrder(playerFacing, 25));
+            spriteLift = 0f;
+        }
     }
 
     GameObject DrawCharacter(string name, string spriteName, Vector2 pos, Vector2 size, Vector2 facing, bool walking, bool working, bool carrying, bool seated, int order, Color accent, string forcedState = null, float animationTime = -1f)
