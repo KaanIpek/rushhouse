@@ -970,4 +970,103 @@ public static class RushhouseVisualVerifier
         UnityEngine.Object.DestroyImmediate(rt);
         Debug.Log("VISUAL_VERIFY screenshot=" + path);
     }
+
+    // Proves the three reported fixes that a plain play capture cannot show:
+    //   1. the stick/ACT pads hug the BOTTOM EDGE on any aspect ratio, not a fixed y in a 1280 box
+    //   2. the touch band that reads them covers the pads it is supposed to cover
+    //   3. a served meal is drawn ON THE TABLE in front of the guest, not under the guest
+    public static void VerifyReportedFixes()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        if (!game) throw new Exception("RushhouseUnityGame not found");
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+        object save = type.GetField("save", flags)?.GetValue(game);
+        save.GetType().GetField("waiter")?.SetValue(save, 1);
+        type.GetMethod("StartDay", flags)?.Invoke(game, null);
+        type.GetMethod("EnsureTouchControls", flags)?.Invoke(game, null);
+
+        bool ok = true;
+
+        // ---- 1. pads are anchored to the bottom edge -------------------------------------------
+        // With anchorMin.y == anchorMax.y == 0 the gap to the bottom is (anchoredPosition.y - h/2)
+        // in reference units and is FIXED, whatever the canvas height works out to on the device.
+        // The old layout anchored to the centre and derived y from the 1280 constant, so the same
+        // gap was (canvasH/2 - (1280/2 - y - h/2)) -- it grew by ~139 units for every 100 units the
+        // real canvas was taller than 1280, which is why the pads floated up into the kitchen.
+        foreach (string nm in new[] { "joyBaseGo", "joyKnobGo", "actBtnGo", "actLabelGo" }) {
+            var go = type.GetField(nm, flags)?.GetValue(game) as GameObject;
+            if (!go) { Debug.Log("PADS " + nm + " MISSING"); ok = false; continue; }
+            var rt = go.GetComponent<RectTransform>();
+            float gap = rt.anchoredPosition.y - rt.sizeDelta.y * .5f;
+            bool bottomAnchored = Mathf.Approximately(rt.anchorMin.y, 0f) && Mathf.Approximately(rt.anchorMax.y, 0f);
+            bool low = gap >= 0f && gap < 260f;    // inside the reserved strip, clear of the home indicator
+            Debug.Log("PADS " + nm + " bottomAnchored=" + bottomAnchored + " gapToBottom=" + gap.ToString("F0")
+                      + " -> " + (bottomAnchored && low ? "PASS" : "FAIL"));
+            if (!bottomAnchored || !low) ok = false;
+        }
+
+        // ---- 2. the band that reads a touch actually covers the drawn pads ----------------------
+        var bandProp = type.GetProperty("TouchBandPixels", flags);
+        float band = (float)bandProp.GetValue(game);
+        float unit = Screen.width / 720f;
+        float padTopPx = (46 + 190) * unit;        // PadMargin + PadSize
+        bool bandOk = band >= padTopPx - .5f;
+        Debug.Log("BAND pixels=" + band.ToString("F0") + " padTop=" + padTopPx.ToString("F0")
+                  + " screen=" + Screen.width + "x" + Screen.height + " -> " + (bandOk ? "PASS" : "FAIL"));
+        if (!bandOk) ok = false;
+
+        // ---- 3. the served meal sits on the table ----------------------------------------------
+        var updatePlay = type.GetMethod("UpdatePlay", flags, null, new[] { typeof(float) }, null);
+        var customers = type.GetField("customers", flags)?.GetValue(game) as IList;
+        for (int i = 0; i < 400 && (customers == null || customers.Count == 0); i++) updatePlay.Invoke(game, new object[] { .05f });
+        for (int i = 0; i < 400; i++) updatePlay.Invoke(game, new object[] { .05f });
+        if (customers == null || customers.Count == 0) { Debug.Log("PLATE no customer -> FAIL"); ok = false; }
+        else {
+            object c = customers[0];
+            Type ct = c.GetType();
+            for (int i = 0; i < 600 && !(bool)ct.GetField("seated").GetValue(c); i++) updatePlay.Invoke(game, new object[] { .05f });
+            ct.GetField("ordered").SetValue(c, true);
+            ct.GetField("mealServed").SetValue(c, true);
+            ct.GetField("mealsServed").SetValue(c, (int)ct.GetField("partySize").GetValue(c));
+            ct.GetField("served").SetValue(c, true);
+            ct.GetField("eatTimer").SetValue(c, 1.2f);
+            type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
+
+            // the dish spawns as a sprite; find it and compare against the guest and the table
+            object table = ct.GetField("table").GetValue(c);
+            Vector2 seat = (Vector2)type.GetMethod("CustomerSeatPosition", flags).Invoke(game, new object[] { c });
+            var applianceCenter = type.GetMethod("ApplianceCenter", flags);
+            Vector2 tableC = (Vector2)applianceCenter.Invoke(game, new object[] { table });
+            GameObject dish = null;
+            foreach (var sr in UnityEngine.Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None)) {
+                if (sr.gameObject.name.StartsWith("final-dish-") && sr.sortingOrder >= 20 && sr.sortingOrder < 40) { dish = sr.gameObject; break; }
+            }
+            if (!dish) {
+                Debug.Log("PLATE no dish sprite found (names seen below) -> FAIL"); ok = false;
+                foreach (var sr in UnityEngine.Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None))
+                    if (sr.sortingOrder >= 20 && sr.sortingOrder < 45) Debug.Log("  sprite " + sr.gameObject.name + " order=" + sr.sortingOrder);
+            } else {
+                float x = dish.transform.position.x;
+                bool towardTable = Mathf.Abs(x - tableC.x) <= Mathf.Abs(seat.x - tableC.x) + .01f;
+                var order = dish.GetComponent<SpriteRenderer>().sortingOrder;
+                Debug.Log("PLATE name=" + dish.name + " order=" + order + " seatX=" + seat.x.ToString("F2")
+                          + " tableX=" + tableC.x.ToString("F2") + " dishX=" + x.ToString("F2")
+                          + " towardTable=" + towardTable + " -> " + (towardTable && order != 24 ? "PASS" : "FAIL"));
+                if (!towardTable || order == 24) ok = false;
+            }
+        }
+
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
+        Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
+        CaptureCamera(Path.Combine(WorkspaceWorkDir(), "verify-eating-table.png"), 540, 960);
+
+        Debug.Log("VERIFY_REPORTED_FIXES " + (ok ? "PASS" : "FAIL"));
+        EditorApplication.Exit(ok ? 0 : 1);
+    }
+
 }
