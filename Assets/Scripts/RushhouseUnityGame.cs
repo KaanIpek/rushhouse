@@ -287,11 +287,26 @@ public class RushhouseUnityGame : MonoBehaviour
     Light sunLight;
     float spriteLift;              // extra world height for the next Make* sprites (food ON counter tops)
     float spriteDepthBoost;        // pull the next sprites toward the camera so overlays never clip
-    // Bottom fraction of the screen reserved for the stick/ACT pads, i.e. the strip where a touch
-    // steers instead of walking. Now derived from where the pads actually SIT (they end 40px above
-    // the bottom of a 1280 frame and are ~190 tall, so ~0.20) instead of a flat 0.30 that ate a
-    // third of the room. With the pads switched off nothing is reserved and the whole screen taps.
-    float TouchBand => (save != null && !save.touchButtons) ? 0f : .20f;
+    // Pad geometry, in canvas reference units measured UP from the bottom edge.
+    const int PadMargin = 46;    // clear of the home indicator
+    const int PadSize = 190;     // stick base
+    const int ActSize = 180;
+
+    // Height in SCREEN PIXELS of the strip the pads occupy — a touch there steers or acts instead of
+    // walking. Derived from the pads' real geometry, never from a magic fraction: the scaler matches
+    // width, so one reference unit is exactly Screen.width / W pixels, whatever the aspect ratio. The
+    // old `Screen.height * .20` was computed from a different axis than the one the pads were laid
+    // out on, so on a tall phone the band and the buttons were in two different places — you could
+    // see a button that did nothing and reserve a strip that showed nothing. With the pads switched
+    // off nothing is reserved and the whole screen taps.
+    float TouchBandPixels
+    {
+        get
+        {
+            if (save != null && !save.touchButtons) return 0f;
+            return (PadMargin + PadSize + 14) * (Screen.width / (float)W);
+        }
+    }
     const float CameraPitch = 38f; // low isometric view: vertical faces read as standing on the floor
     static readonly float GroundProjection = Mathf.Sin(CameraPitch * Mathf.Deg2Rad);
     const float CameraDistance = 24f;
@@ -675,7 +690,7 @@ public class RushhouseUnityGame : MonoBehaviour
         PauseToggle("SOUND EFFECTS", save.sfxOn, y, () => { save.sfxOn = !save.sfxOn; }, Reopen); y += rowStep;
         PauseToggle("VIBRATION", save.hapticsOn, y, () => { save.hapticsOn = !save.hapticsOn; }, Reopen); y += rowStep;
         // Turning the pads off is only safe because tap-to-walk, hold-to-keep-walking and
-        // hold-on-a-station-to-work-it all exist; see UpdatePlay. TouchBand also drops to 0 so the
+        // hold-on-a-station-to-work-it all exist; see UpdatePlay. The reserved band also drops to 0 so the
         // strip the pads used to reserve becomes tappable world again.
         PauseToggle("ON-SCREEN BUTTONS", save.touchButtons, y,
             () => { save.touchButtons = !save.touchButtons; }, Reopen); y += rowStep;
@@ -1321,19 +1336,27 @@ public class RushhouseUnityGame : MonoBehaviour
         touchRoot.transform.SetParent(uiRoot, false);
         var trt = touchRoot.GetComponent<RectTransform>();
         trt.anchorMin = Vector2.zero; trt.anchorMax = Vector2.one; trt.offsetMin = Vector2.zero; trt.offsetMax = Vector2.zero;
-        // Both pads sit at the BOTTOM of the frame (y is measured from the top; H is 1280, the pads
-        // are 190/180 tall, so ~1050 leaves a 40px margin clear of the home indicator). They used to
-        // float around 72% down, which put them right over the kitchen you were trying to watch.
-        joyBaseGo = MakeTouchImage("joy-base", new Color(1, 1, 1, .12f), 44, 1050, 190, 190);
-        joyKnobGo = MakeTouchImage("joy-knob", new Color(1, 1, 1, .34f), 109, 1115, 60, 60);
+        // ANCHORED TO THE BOTTOM EDGE, not to a y measured down from a 1280-tall box.
+        //
+        // The canvas scaler matches WIDTH (see EnsureCanvas), so the reference frame is always 720
+        // wide but its HEIGHT is 720 * aspect — 1558 units on a 19.5:9 phone, not 1280. Place() lays
+        // out from the centre using the H constant, so "y = 1050" meant 410 units below centre, while
+        // the real bottom was 779 below. The pads therefore floated ~320 units UP into the kitchen on
+        // every modern phone: not at the bottom, and worse, drawn OUTSIDE the touch band that reads
+        // them, so pressing the visible button did nothing. Anchoring to the bottom fixes the
+        // position and the hit test together on every aspect ratio.
+        joyBaseGo = MakeTouchImage("joy-base", new Color(1, 1, 1, .12f), 44, PadMargin, PadSize, PadSize);
+        joyKnobGo = MakeTouchImage("joy-knob", new Color(1, 1, 1, .34f), 44 + (PadSize - 60) / 2,
+                                   PadMargin + (PadSize - 60) / 2, 60, 60);
         joyBaseCenter = joyKnobGo.GetComponent<RectTransform>().anchoredPosition;
-        actBtnGo = MakeTouchImage("act-btn", new Color(gold.r, gold.g, gold.b, .24f), 486, 1060, 180, 180);
+        int actY = PadMargin + (PadSize - ActSize) / 2;
+        actBtnGo = MakeTouchImage("act-btn", new Color(gold.r, gold.g, gold.b, .24f), 486, actY, ActSize, ActSize);
         var label = new GameObject("act-label", typeof(Text));
         label.transform.SetParent(touchRoot.transform, false);
         var lt = label.GetComponent<Text>();
         lt.font = uiFont; lt.text = "ACT"; lt.fontSize = 30; lt.fontStyle = FontStyle.Bold;
         lt.alignment = TextAnchor.MiddleCenter; lt.color = new Color(1, 1, 1, .82f); lt.raycastTarget = false;
-        Place(label.GetComponent<RectTransform>(), 486, 1130, 180, 40);
+        PlaceBottom(label.GetComponent<RectTransform>(), 486, actY + (ActSize - 40) / 2, 180, 40);
         actLabelGo = label;
         // zoom +/- buttons (persistent so their onClick survives the per-tick UI rebuild), right edge
         MakeZoomButton("zoom-in", "+", 636, 432, () => SetZoom(camZoom + .18f));
@@ -1358,14 +1381,24 @@ public class RushhouseUnityGame : MonoBehaviour
         rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one; rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
     }
 
-    GameObject MakeTouchImage(string name, Color color, int x, int y, int w, int h)
+    GameObject MakeTouchImage(string name, Color color, int x, int yFromBottom, int w, int h)
     {
         var go = new GameObject(name, typeof(Image));
         go.transform.SetParent(touchRoot.transform, false);
         var img = go.GetComponent<Image>();
         img.sprite = circleSprite; img.color = color; img.raycastTarget = false;
-        Place(go.GetComponent<RectTransform>(), x, y, w, h);
+        PlaceBottom(go.GetComponent<RectTransform>(), x, yFromBottom, w, h);
         return go;
+    }
+
+    // Like Place(), but measured UP from the bottom edge of the canvas instead of down from the top
+    // of a fixed 1280-tall box. Anything that must hug the bottom on every aspect ratio uses this.
+    void PlaceBottom(RectTransform rt, int x, int yFromBottom, int w, int h)
+    {
+        rt.anchorMin = rt.anchorMax = new Vector2(.5f, 0f);
+        rt.pivot = new Vector2(.5f, .5f);
+        rt.sizeDelta = new Vector2(w, h);
+        rt.anchoredPosition = new Vector2(x + w / 2f - W / 2f, yFromBottom + h / 2f);
     }
 
     void UpdateTouchControls()
@@ -1389,9 +1422,12 @@ public class RushhouseUnityGame : MonoBehaviour
         // the band must COVER the drawn joystick/ACT art (its top reaches ~28% up) or touches on the
         // upper half of the visible controls were dead AND leaked through as walk commands. Kept in
         // lockstep with the tap-to-walk gate in UpdatePlay.
-        float band = Screen.height * TouchBand;
+        float band = TouchBandPixels;
         float midX = Screen.width * .5f;
-        float radius = Screen.height * .10f;
+        // Full tilt at the EDGE OF THE DRAWN RING. This was Screen.height * .10, an unrelated axis:
+        // on a 19.5:9 phone that is ~253px of travel while the visible base is only ~154px across, so
+        // running flat out meant dragging your thumb well outside the ring you can see.
+        float radius = (PadSize * .5f) * (Screen.width / (float)W);
 
         if (Input.touchCount > 0) {
             // adopt a joystick finger anywhere in the bottom-left band (not just on Began, so a resting finger can take over)
@@ -2807,7 +2843,25 @@ public class RushhouseUnityGame : MonoBehaviour
             DrawWorldText("DRINK " + c.drinkCount + "/" + c.partySize, hud, .015f, blue, 46);
             spriteLift = 0f;
         }
-        if (c.served) DrawFinalDish(c.recipe, hud + new Vector2(0, -.08f), .24f, 24);
+        // THE MEAL GOES ON THE TABLE, in front of the guest eating it.
+        //
+        // It used to be drawn at `hud` — the guest's own seat position — nudged down .08 and at draw
+        // order 24, which is BELOW the seated figure's 26. So the plate rendered underneath the
+        // customer instead of on the table they are sitting at: food on the chair, hidden behind a
+        // body. Every station in the game already puts its contents on its top surface with
+        // spriteLift (see DrawAppliance); the table is a surface too and had simply never been told.
+        //
+        // Each guest gets their own plate in front of them, lifted to table height, and ordered with
+        // the same rule carried items use: a guest facing away from the camera has their plate
+        // BEHIND them on the far side of the table, everyone else has it between them and the lens.
+        if (c.served) {
+            for (int i = 0; i < n; i++) {
+                Vector2 plate = slots[i].pos + slots[i].face * .30f;   // a third of a tile onto the table top
+                spriteLift = .52f;                                     // table surface, same as station contents
+                DrawFinalDish(c.recipe, plate, .24f, CarryDrawOrder(slots[i].face, 26));
+                spriteLift = 0f;
+            }
+        }
         // impatient guest emote: a pulsing red "!" that jitters as they get closer to walking out
         if (!c.served && c.ordered && !c.mealServed && c.patience < c.maxPatience * .3f) {
             float pulse = .5f + .5f * Mathf.Sin(Time.time * 9f);
@@ -2946,10 +3000,27 @@ public class RushhouseUnityGame : MonoBehaviour
         return dir.y > .1f ? "back" : "front";
     }
 
+    // Where the HAND is, measured off the rigged art rather than guessed.
+    //
+    // Across every player_{left,right}_carry_* and _carrywalk_* frame the outstretched arm runs from
+    // the idle body edge (x≈172) out to x≈213 in a 256-wide frame, and the hand itself sits at
+    // x≈203. The sprite is drawn 1.05 world units wide (MakeSprite fits width here, since the frame
+    // is relatively wider than the 1.05×1.5 box), so the hand is (203−128)/256 × 1.05 ≈ 0.31 units
+    // off centre. The old .23 dropped the item in the GAP between the body and the hand — past the
+    // shoulder, short of the fingers — which is exactly the "it floats off to the side, not in their
+    // hand" you can see in any carrying frame. Front and back carry frames hold the item in both
+    // hands at the body's centre line (measured bbox is symmetric), so those stay unshifted.
+    // ...but the ART's reach is NOT what reads correctly at gameplay scale. A capture at 540×960 puts
+    // a character about 35px tall on screen, and .31 units is a whole body width — the item detaches
+    // and floats in bare floor beside them, which is the bug being reported, and pushing it further
+    // out to the measured fingertips only made it worse. At this size the item has to OVERLAP the
+    // body to read as held, so it sits just inside the silhouette edge instead of at arm's length.
+    const float HandReach = .12f;
+
     Vector2 CarryOffset(Vector2 facing)
     {
         Vector2 dir = FacingOrDefault(facing);
-        if (Mathf.Abs(dir.x) > Mathf.Abs(dir.y)) return new Vector2(dir.x > 0 ? .23f : -.23f, .015f);
+        if (Mathf.Abs(dir.x) > Mathf.Abs(dir.y)) return new Vector2(dir.x > 0 ? HandReach : -HandReach, .015f);
         if (dir.y > 0) return new Vector2(0f, .13f);
         return new Vector2(0f, .015f);
     }
@@ -3291,7 +3362,7 @@ public class RushhouseUnityGame : MonoBehaviour
         }
         if (Input.GetKeyDown(KeyCode.Space)) InteractNearest();
         HandleHold(dt, actHeld || Input.GetKey(KeyCode.Space) || holdPressed || pointerHoldAct);
-        if (Input.GetMouseButtonDown(0) && !PointerOverUI() && Input.mousePosition.y > Screen.height * TouchBand) {
+        if (Input.GetMouseButtonDown(0) && !PointerOverUI() && Input.mousePosition.y > TouchBandPixels) {
             Vector2 p = ScreenToGamePoint(Input.mousePosition);
             Appliance a = ApplianceAtScreen(Input.mousePosition);   // pick the prop you actually clicked
             if (a != null) {
@@ -3316,22 +3387,37 @@ public class RushhouseUnityGame : MonoBehaviour
         // Holding ON a station already within reach works it instead (chop, wash) — otherwise there
         // would be no way to run a hold action without the ACT pad.
         bool pointerDown = Input.GetMouseButton(0) && !PointerOverUI()
-                           && Input.mousePosition.y > Screen.height * TouchBand;
+                           && Input.mousePosition.y > TouchBandPixels;
         pointerHoldAct = false;
         if (pointerDown) {
             pointerHold += dt;
             if (pointerHold > .18f) {                       // .18s so a quick tap stays a tap
                 Appliance under = ApplianceAtScreen(Input.mousePosition);
-                if (under != null && DistanceToAppliance(playerPos, under) < InteractionRange(under)) {
+                Vector2 wp = ScreenToGamePoint(Input.mousePosition);
+                // HOLDING ANYWHERE IS THE ACT BUTTON.
+                //
+                // It used to require the finger to be ON the station, which meant chopping only
+                // worked if your thumb was covering the very board you were trying to watch — and if
+                // you held anywhere else, the game read it as "walk here" and cancelled the prep. So
+                // a held finger now runs whatever station you are standing at, picked the same way
+                // HandleHold picks it (NearestAppliance), so screen-hold and the ACT pad do exactly
+                // the same job.
+                //
+                // Gated on the finger being NEAR YOU rather than literally anywhere: with the pads
+                // switched off, hold-to-walk is the only way to move, and a player standing beside a
+                // chopping board still has to be able to hold at the far side of the room and leave.
+                // Pressing on or around yourself means "work"; pressing away means "go there".
+                var workable = NearestAppliance(.58f);
+                bool standingAtStation = workable != null && HoldableAppliance(workable);
+                bool fingerOnStation = under != null && DistanceToAppliance(playerPos, under) < InteractionRange(under);
+                bool fingerNearMe = Vector2.Distance(wp, playerPos) < 1.15f;
+                if (fingerOnStation || (standingAtStation && fingerNearMe)) {
                     pointerHoldAct = true;
                     hasMoveTarget = false;
-                } else {
-                    Vector2 wp = ScreenToGamePoint(Input.mousePosition);
-                    if (WorldInsideGrid(wp)) {
-                        moveTarget = IsWalkablePosition(wp, .16f) ? wp : SafeOpenPosition(wp, .16f);
-                        tapAction = under;                  // held over a distant station: go and use it
-                        hasMoveTarget = true;
-                    }
+                } else if (WorldInsideGrid(wp)) {
+                    moveTarget = IsWalkablePosition(wp, .16f) ? wp : SafeOpenPosition(wp, .16f);
+                    tapAction = under;                      // held over a distant station: go and use it
+                    hasMoveTarget = true;
                 }
             }
         } else pointerHold = 0f;
