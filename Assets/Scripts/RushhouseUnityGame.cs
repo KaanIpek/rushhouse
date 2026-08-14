@@ -2387,8 +2387,13 @@ public class RushhouseUnityGame : MonoBehaviour
         float cornerW = cornerSpan + .3f;
         for (int s = 0; s < 2; s++) {
             float cxp = s == 0 ? all.xMin + cornerSpan * .5f - .12f : all.xMax - cornerSpan * .5f + .12f;
+            // MIRROR THE LEFT ONE. The piece is an L: a wall panel with a return post at ONE end,
+            // and a render of it at all four yaws (RushhouseVisualVerifier.CaptureCornerProbe) puts
+            // that post on the RIGHT at 0 and on the LEFT at 180. Both corners were built at 0, so
+            // the left corner turned its post inward and left the actual corner open -- the two ends
+            // of a wall need mirrored copies, never the same one twice.
             MakeArchitecturalModel("corner-wall-" + s, "cornerwall", new Vector2(cxp, backY),
-                                   cornerW, .3f, 1.05f, 0f);
+                                   cornerW, .3f, 1.05f, s == 0 ? 180f : 0f);
         }
         MakeArchitecturalModel("entrance-gate", "gate", new Vector2(0f, backY - .035f), backPiece * .72f, .14f, .9f, 0f);
         var pictureFrame = MakeArchitecturalModel("back-picture-frame", "frame",
@@ -2858,7 +2863,7 @@ public class RushhouseUnityGame : MonoBehaviour
             for (int i = 0; i < n; i++) {
                 Vector2 plate = slots[i].pos + slots[i].face * .30f;   // a third of a tile onto the table top
                 spriteLift = .52f;                                     // table surface, same as station contents
-                DrawFinalDish(c.recipe, plate, .24f, CarryDrawOrder(slots[i].face, 26));
+                DrawPlatedDish(c.recipe, plate, .24f, CarryDrawOrder(slots[i].face, 26));
                 spriteLift = 0f;
             }
         }
@@ -2909,9 +2914,11 @@ public class RushhouseUnityGame : MonoBehaviour
         if (w == null || (w.carry == null && w.carryRecipe == null)) return;
         Vector2 hand = w.pos + CarryOffset(w.facing);
         int carryOrder = CarryDrawOrder(w.facing, 21);
-        spriteLift = .38f;                       // hand height, same reason as the player above
+        spriteLift = CarryLift(CarryOffset(w.facing));
         if (w.carryRecipe != null) {
-            DrawFinalDish(w.carryRecipe, hand, .25f, carryOrder);
+            // A waiter used to carry a naked dish with no plate under it. Same composition as the
+            // player's hands so the food does not change vessel on its way to the table.
+            DrawPlatedDish(w.carryRecipe, hand, .23f, carryOrder);
             spriteLift = 0f;
             return;
         }
@@ -2931,8 +2938,9 @@ public class RushhouseUnityGame : MonoBehaviour
             // contents already do exactly this (see DrawAppliance); carried items never did.
             // Size also dropped from .46 to .30: the player's held item was rendered at twice the
             // staff's .23, which is what made a bun on the floor read as a whole burger.
-            spriteLift = .42f;
-            DrawHeld(holding, playerPos + CarryOffset(playerFacing), .30f, true, CarryDrawOrder(playerFacing, 25));
+            Vector2 carry = CarryOffset(playerFacing);
+            spriteLift = CarryLift(carry);
+            DrawHeld(holding, playerPos + carry, .26f, true, CarryDrawOrder(playerFacing, 25));
             spriteLift = 0f;
         }
     }
@@ -3030,6 +3038,32 @@ public class RushhouseUnityGame : MonoBehaviour
         return FacingOrDefault(facing).y > .35f ? characterOrder - 1 : characterOrder + 8;
     }
 
+    // WHERE A CARRIED ITEM SITS ON THE BODY.
+    //
+    // A character is a camera-facing quad CENTRED on its ground position, so the sprite's pivot is
+    // roughly waist height and everything is measured from there -- not from the floor. This figure
+    // was read off a render with the engine printing the character's pivot row beside it
+    // (RushhouseVisualVerifier.CaptureCarryAudit prints CLOSEUP lines for exactly this): the gloves
+    // land .36 of a world unit above the pivot, so that is where the item goes.
+    //
+    // What was actually broken was not this number, it was that CarryOffset's y was added ON TOP of
+    // it. A character facing AWAY gets +.13 there to put the item on the far side of the body, and
+    // .13 is most of a head: front-facing the plate sat at the chest, back-facing it sat on the
+    // hat. That is the "he carries it on his head" report, and why it only showed in some frames.
+    const float HandDrop = .357f;                   // camera-vertical units, from the character's centre
+
+    static readonly float CameraCos = Mathf.Cos(CameraPitch * Mathf.Deg2Rad);
+
+    // spriteLift is a WORLD-up offset and world up is foreshortened by the camera pitch on its way
+    // to the screen, so undo that here: callers think in screen-vertical, which is what reads as
+    // "at their hands". CarryOffset's own y already moves the item along the ground plane, and by
+    // this projection's construction one ground unit north is one screen unit up -- so subtract it
+    // or a character facing away holds the item .13 higher than one facing the camera.
+    float CarryLift(Vector2 carryOffset)
+    {
+        return (HandDrop - carryOffset.y) / CameraCos;
+    }
+
     void DrawFacingMarker(Vector2 pos, Vector2 facing, Color color, int order)
     {
         Vector2 dir = FacingOrDefault(facing);
@@ -3101,11 +3135,7 @@ public class RushhouseUnityGame : MonoBehaviour
             // Carry it as a PLATE with the dish sitting on it. The old code swapped in a giant
             // dish sprite, so the plate vanished and a huge burger filled the player's hands.
             if (carryVisual) {
-                Sprite plate = CarrySprite("plate") ?? ObjectSprite("singlePlate");
-                MakeSprite("carry-plate", plate, p, new Vector2(size * 1.5f, size * 1.28f), Color.white, carryOrder);
-                // dish sits centred ON the plate, small enough to stay inside its rim
-                Sprite dish = FinalDishSprite(completed.id) ?? CarrySprite(completed.id);
-                MakeSprite("carry-dish-" + completed.id, dish, p + new Vector2(0, size * .1f), Vector2.one * size * .72f, Color.white, carryOrder + 1);
+                DrawPlatedDish(completed, p, size, carryOrder);
             } else {
                 // Same treatment as the carried version above: a plate with the dish ON it. This
                 // branch used to draw the dish ALONE at 1.85x and no plate at all, so a finished
@@ -3113,8 +3143,7 @@ public class RushhouseUnityGame : MonoBehaviour
                 // table. 0.92x is sized to sit inside the plate rim, matching the ingredient stack
                 // it replaces the instant the recipe completes -- otherwise the dish visibly jumps
                 // in size at that moment.
-                DrawSinglePlate(p, size, 28);
-                DrawFinalDish(completed, p + new Vector2(0, size * .12f), size * .92f, 30);
+                DrawPlatedDish(completed, p, size, 28);
             }
             return;
         }
@@ -3167,6 +3196,26 @@ public class RushhouseUnityGame : MonoBehaviour
         }
         return recipes.FirstOrDefault(r => r.theme == save.theme && PlateMatches(item, r));
     }
+
+    // FOOD SITTING IN A PLATE, from one place.
+    //
+    // Four call sites drew a finished dish and all four disagreed: the player's hands drew a plate
+    // with the dish at .72 of its width, the counter drew it at .92, a served table drew the dish
+    // with NO PLATE UNDER IT, and a waiter carried a naked burger through the dining room. The
+    // numbers here are measured off a render (RushhouseVisualVerifier.CaptureCarryAudit): at .72
+    // and centred the bun hung off the near rim, which is the "food is spilling off the plate"
+    // report. `size` is the plate's own width; the dish is a fraction of it and rides higher,
+    // because the plate is drawn as a shallow ellipse and its well is above its centre line.
+    void DrawPlatedDish(Recipe recipe, Vector2 p, float size, int order)
+    {
+        if (recipe == null) return;
+        Sprite plate = CarrySprite("plate") ?? ObjectSprite("singlePlate");
+        if (plate) MakeSprite("plated-plate-" + recipe.id, plate, p, new Vector2(size * 1.5f, size * 1.28f), Color.white, order);
+        DrawFinalDish(recipe, p + new Vector2(0, size * DishRise), size * DishOfPlate, order + 1);
+    }
+
+    const float DishOfPlate = .60f;   // dish width as a fraction of the plate's
+    const float DishRise = .45f;      // how far above the plate's centre the food sits, same units
 
     void DrawFinalDish(Recipe recipe, Vector2 p, float size, int order)
     {
@@ -4419,11 +4468,16 @@ public class RushhouseUnityGame : MonoBehaviour
                 }
             } else if (a.customer != null && !a.customer.leaving && holding?.kind == "plate" && !holding.dirty
                        && holding.parts.Count >= (a.customer.orderParts?.Count ?? a.customer.recipe.parts.Length)) {
-                // only a COMPLETE but incorrect dish is a wrong order — carrying a dirty or half-built
-                // plate past a table used to destroy it and cost a complaint.
+                // A WRONG DISH IS REFUSED, NOT SWALLOWED. This used to null `holding`, so walking up
+                // to the wrong table deleted a finished meal outright: minutes of work gone with no
+                // undo and no way to see it coming. The guest simply declines it and the plate stays
+                // in hand, which is also the only reading under which the message is actionable —
+                // it names what they actually ordered so the plate can be walked to the right table.
+                // Still counted, so the day's "no mistakes" goal keeps its teeth and the results
+                // screen's WRONG column keeps meaning something -- but it costs the plate nothing
+                // and raises no complaint, because nothing was actually served to anyone.
                 wrongOrders++;
-                holding = null;
-                AddComplaint("Wrong order");
+                SetMessage("They ordered " + a.customer.recipe.label, .9f);
             } else if (a.customer != null && holding?.kind == "plate" && holding.dirty) {
                 SetMessage("Wash that plate first", .8f);
             } else if (a.customer != null && !a.customer.leaving && holding?.kind == "plate" && !holding.dirty) {

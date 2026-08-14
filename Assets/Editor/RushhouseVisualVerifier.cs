@@ -1069,4 +1069,164 @@ public static class RushhouseVisualVerifier
         EditorApplication.Exit(ok ? 0 : 1);
     }
 
+
+    // CARRY / PLATE / CORNER AUDIT. Renders the four things reported from a play session at a size
+    // where they can actually be judged, and prints screen-space geometry next to each one so the
+    // follow-up fix is arithmetic instead of another eyeball.
+    public static void CaptureCarryAudit()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        if (!game) throw new Exception("RushhouseUnityGame not found");
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+
+        object save = type.GetField("save", flags)?.GetValue(game);
+        if (save != null) {
+            Type st = save.GetType();
+            foreach (string nm in new[] { "waiter", "cook", "prepper", "washer" }) st.GetField(nm)?.SetValue(save, 1);
+            st.GetField("day")?.SetValue(save, 3);
+        }
+        type.GetMethod("StartDay", flags)?.Invoke(game, null);
+
+        // Player holds a COMPLETE plate — the state the report is about — facing the camera.
+        var recipes = type.GetField("recipes", flags)?.GetValue(game) as IList;
+        object recipe = null;
+        foreach (var r in recipes) { recipe = r; break; }
+        Type itemType = type.GetNestedType("Item", BindingFlags.NonPublic);
+        object plate = itemType?.GetMethod("Plate", BindingFlags.Public | BindingFlags.Static)
+            ?.Invoke(null, new object[] { false });
+        if (plate != null && recipe != null) {
+            var parts = plate.GetType().GetField("parts")?.GetValue(plate) as IList;
+            var rparts = recipe.GetType().GetField("parts")?.GetValue(recipe) as Array;
+            if (parts != null && rparts != null) foreach (var part in rparts) parts.Add(part);
+            type.GetField("holding", flags)?.SetValue(game, plate);
+        }
+        type.GetField("playerFacing", flags)?.SetValue(game, Vector2.down);
+        type.GetField("playerWalking", flags)?.SetValue(game, false);
+
+        // A waiter carrying a finished dish, and a seated guest who has already been served, so the
+        // in-hand and on-table renders of the same food land in one frame.
+        var workers = type.GetField("workers", flags)?.GetValue(game) as IList;
+        if (workers != null) {
+            foreach (var w in workers) {
+                var wt = w.GetType();
+                if ((string)wt.GetField("role")?.GetValue(w) != "waiter") continue;
+                wt.GetField("carryRecipe")?.SetValue(w, recipe);
+                wt.GetField("facing")?.SetValue(w, Vector2.down);
+                break;
+            }
+        }
+        var customers = type.GetField("customers", flags)?.GetValue(game) as IList;
+        MethodInfo updateCustomerMotion = type.GetMethod("UpdateCustomerMotion", flags);
+        for (int i = 0; i < 40; i++) updateCustomerMotion?.Invoke(game, new object[] { 0.06f });
+        if (customers != null) {
+            foreach (var c in customers) {
+                var ct = c.GetType();
+                if (!(bool)ct.GetField("seated").GetValue(c)) continue;
+                ct.GetField("ordered")?.SetValue(c, true);
+                ct.GetField("served")?.SetValue(c, true);
+                ct.GetField("mealServed")?.SetValue(c, true);
+                break;
+            }
+        }
+
+        type.GetMethod("BuildPlayUI", flags)?.Invoke(game, null);
+        type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
+
+        Camera cam = Camera.main;
+        float pitch = 38f;
+        float proj = Mathf.Sin(pitch * Mathf.Deg2Rad);
+        Func<Vector2, Vector3> ground = v => new Vector3(v.x, 0f, v.y / proj);
+
+        // Screen-space geometry of the character against what it is carrying. A billboard sprite is
+        // a camera-facing quad centred on the actor's ground point, so "how far up the body is this"
+        // is answered in the camera's own vertical axis, not in world Y.
+        Vector2 playerPos = (Vector2)type.GetField("playerPos", flags).GetValue(game);
+        foreach (var sr in UnityEngine.Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None)) {
+            string n = sr.gameObject.name;
+            if (n != "player" && !n.StartsWith("carry-") && !n.StartsWith("final-dish")) continue;
+            Vector3 sp = cam.WorldToScreenPoint(sr.bounds.center);
+            Debug.Log(string.Format("CARRY_GEOM {0,-22} centreY={1,7:F1}px height={2,6:F1}px order={3}",
+                n, sp.y, cam.WorldToScreenPoint(sr.bounds.max).y - cam.WorldToScreenPoint(sr.bounds.min).y,
+                sr.sortingOrder));
+        }
+
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = cam; canvas.planeDistance = 1f; }
+        Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
+
+        string dir = WorkspaceWorkDir();
+        CaptureCamera(Path.Combine(dir, "audit-room.png"), 540, 960);
+
+        // Hide the HUD for the close-ups: at this zoom a full-screen canvas covers the subject.
+        if (canvas) canvas.enabled = false;
+
+        float baseOrtho = cam.orthographicSize;
+        Action<string, Vector2, float> closeUp = (file, focus, ortho) => {
+            cam.orthographicSize = ortho;
+            cam.transform.position = ground(focus) - cam.transform.forward * 24f;
+            CaptureCamera(Path.Combine(dir, file), 640, 640);
+        };
+        closeUp("audit-player-carry.png", playerPos, 1.15f);
+
+        // Report positions in the CLOSE-UP's own pixel rows, so a number here can be compared
+        // directly against a ruler drawn on the PNG. WorldToScreenPoint would answer in the
+        // batch-mode window's resolution, which is not the render texture's -- so project by hand.
+        float o = 1.15f;
+        Vector3 camPos = cam.transform.position, up = cam.transform.up;
+        Func<Vector3, float> row = w => 320f - Vector3.Dot(w - camPos, up) / o * 320f;
+        foreach (var sr in UnityEngine.Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None)) {
+            string n = sr.gameObject.name;
+            if (n != "player" && !n.StartsWith("plated-") && !n.StartsWith("carry-") && !n.StartsWith("final-dish")) continue;
+            float quad = Vector3.Dot(sr.bounds.max - sr.bounds.min, up);
+            Debug.Log(string.Format("CLOSEUP {0,-24} sprite={1,-26} pivotRow={2,7:F1} quadRows={3,7:F1}",
+                n, sr.sprite ? sr.sprite.name : "-", row(sr.transform.position), quad / o * 320f));
+        }
+
+        // `all` is a local inside the world builder, so ask the same source it does.
+        Rect all = (Rect)type.GetMethod("CellRect", flags).Invoke(game, new object[] { 0, 0, 10, 17 });
+        closeUp("audit-corner-left.png", new Vector2(all.xMin + .7f, all.yMax - .35f), 1.5f);
+        closeUp("audit-corner-right.png", new Vector2(all.xMax - .7f, all.yMax - .35f), 1.5f);
+        cam.orthographicSize = baseOrtho;
+
+        Debug.Log("CARRY_AUDIT done");
+        EditorApplication.Exit(0);
+    }
+
+
+    // Four copies of the corner-wall model, one per yaw, in a clear stretch of floor. Both back
+    // corners currently use yaw 0, which cannot be right for an L-shaped piece -- this says which
+    // rotation actually closes the corner instead of pointing a blank face into the room.
+    public static void CaptureCornerProbe()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+        type.GetMethod("StartDay", flags)?.Invoke(game, null);
+        type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
+
+        MethodInfo make = type.GetMethod("MakeArchitecturalModel", flags);
+        Rect all = (Rect)type.GetMethod("CellRect", flags).Invoke(game, new object[] { 0, 0, 10, 17 });
+        float y = all.center.y;
+        for (int i = 0; i < 4; i++) {
+            float x = all.xMin + 1.1f + i * 2.1f;
+            make.Invoke(game, new object[] { "probe-" + i * 90, "cornerwall", new Vector2(x, y), 1.08f, .3f, 1.05f, i * 90f });
+        }
+
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) canvas.enabled = false;
+        Camera cam = Camera.main;
+        float proj = Mathf.Sin(38f * Mathf.Deg2Rad);
+        cam.orthographicSize = 4.2f;
+        cam.transform.position = new Vector3(all.center.x, 0f, y / proj) - cam.transform.forward * 24f;
+        CaptureCamera(Path.Combine(WorkspaceWorkDir(), "probe-corner-yaws.png"), 900, 620);
+        Debug.Log("CORNER_PROBE done (left to right: yaw 0, 90, 180, 270)");
+        EditorApplication.Exit(0);
+    }
+
 }
