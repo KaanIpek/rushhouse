@@ -419,8 +419,6 @@ public class RushhouseUnityGame : MonoBehaviour
     float messageTimer;
     Appliance selectedLayout;
     bool draggingLayout;
-    Appliance infoAppliance;      // station whose detail card is showing (tap/hover during play)
-    float infoTimer;
     // tap a TICKET to open a full recipe breakdown (what exactly the guest ordered)
     readonly List<(Rect rect, Recipe recipe)> ticketRows = new List<(Rect, Recipe)>();
     // tap the dish floating over a guest's head for the same breakdown
@@ -570,6 +568,7 @@ public class RushhouseUnityGame : MonoBehaviour
     void ApplyCamera()
     {
         if (!cam) return;
+        if (screen == ScreenMode.Layout) { ApplyLayoutCamera(); return; }
         float ortho = Mathf.Clamp(BaseOrtho / camZoom, 4.2f, 8.9f);
         cam.orthographicSize = ortho;
         // lift the framing with zoom so the entrance door stays in view below the top HUD while the
@@ -596,6 +595,37 @@ public class RushhouseUnityGame : MonoBehaviour
             shakeAmp = 0f;
             cam.transform.position = camHome;
         }
+    }
+
+    // FIT THE WHOLE ROOM, because you cannot arrange a restaurant you can only see two thirds of.
+    //
+    // The floorplan's own furniture -- header, action row, selection card, shop sheet, footer --
+    // takes a little over half the screen, and the play camera knows nothing about that: it framed
+    // the room for a HUD with a clear middle, so the storefront ended up behind the selection card.
+    // This solves for the ortho size that puts the entire room, walls included, inside the band
+    // that is actually free, and centres it in that band rather than on the screen.
+    //
+    // Every UI element is anchored to the CENTRE of a 720x1280 box (see Place), so a UI y maps to
+    // (H/2 - y) units above the screen centre, and the visible height in those units is W/aspect --
+    // which is how a taller phone correctly gets a taller band rather than a rescaled one.
+    void ApplyLayoutCamera()
+    {
+        const float bandTop = 310f, bandBottom = 930f, wallPad = 1.1f;
+        float aspect = cam.aspect > .01f ? cam.aspect : (float)W / H;
+        float uiH = W / aspect;
+        Rect room = CellRect(0, 0, Cols, Rows);
+
+        float bandUI = bandBottom - bandTop;
+        float ortho = Mathf.Max((room.height + wallPad) * uiH / (2f * bandUI),
+                                (room.width + wallPad) / (2f * aspect));
+        cam.orthographicSize = ortho;
+
+        float unitsPerUI = 2f * ortho / uiH;
+        float bandCentreAboveScreenCentre = (H * .5f - (bandTop + bandBottom) * .5f) * unitsPerUI;
+        Vector2 focus = new Vector2(room.center.x + camPan.x,
+                                    room.center.y - bandCentreAboveScreenCentre + camPan.y);
+        camHome = GameGroundPoint(focus, 0f) - cam.transform.forward * CameraDistance;
+        cam.transform.position = camHome;
     }
 
     void Shake(float amp) { shakeAmp = Mathf.Min(.32f, Mathf.Max(shakeAmp, amp)); }
@@ -633,31 +663,50 @@ public class RushhouseUnityGame : MonoBehaviour
         else BuildPlayUI();
     }
 
+    // A sheet that sits over whatever screen opened it. Both overlays use the same one so they
+    // cannot drift apart the way the old AddCard versions did.
+    int OverlaySheet(int top, int height, string name)
+    {
+        AddPanel(0, 0, W, H, new Color(.02f, .03f, .05f, .82f), uiRoot, name + "-veil");
+        const int sx = 40;
+        Surface(sx, top, W - sx * 2, height, RushhouseUIKit.Surface, 30, true, name + "-sheet");
+        return sx;
+    }
+
     void DrawPauseOverlay()
     {
-        AddPanel(0, 0, W, H, new Color(.02f, .03f, .05f, .88f), uiRoot, "pause-veil");
-        const int px = 56, pw = 608;
-        AddCard(px, 318, pw, 562, gold, "pause");
-        AddText("PAUSED", 360, 372, 34, gold, FontStyle.Bold);
-        AddText("DAY " + save.day, 360, 404, 13, muted, FontStyle.Bold);
-        DrawStarPips(304, 424, 16);
+        // Sized from its contents rather than a constant, so a fourth toggle or a longer title
+        // cannot silently push the buttons off the bottom.
+        const int rows = 3, rowStep = 62;
+        int top = 300, y;
+        int height = 250 + rows * rowStep + 172;
+        int sx = OverlaySheet(top, height, "pause");
+        int cw = W - sx * 2 - 44, cx = sx + 22;
 
-        // shift snapshot: the two numbers that decide whether resuming is worth it
-        AddChip(px + 22, 462, 268, 62, mint, "pause-served", .09f);
-        AddText(served + "/" + goal, px + 156, 484, 22, mint, FontStyle.Bold);
-        AddText("SERVED", px + 156, 508, 10, muted, FontStyle.Bold);
-        AddChip(px + 300, 462, 268, 62, gold, "pause-earned", .09f);
-        AddText("$" + earned, px + 434, 484, 22, gold, FontStyle.Bold);
-        AddText("EARNED", px + 434, 508, 10, muted, FontStyle.Bold);
+        AddText("PAUSED", W / 2, top + 52, 30, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleCenter, "pause-title");
+        AddText("DAY " + save.day, W / 2, top + 82, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "pause-day");
+        DrawStarPips(W / 2 - 58, top + 100, 16);
 
-        // audio + haptics toggles (#23/#25) — full-width rows so each label has room to say
-        // what it does and its state, rather than three cramped side-by-side buttons
-        PauseToggle("MUSIC", save.musicOn, 546, () => { save.musicOn = !save.musicOn; });
-        PauseToggle("SOUND EFFECTS", save.sfxOn, 606, () => { save.sfxOn = !save.sfxOn; });
-        PauseToggle("VIBRATION", save.hapticsOn, 666, () => { save.hapticsOn = !save.hapticsOn; });
+        // The two numbers that decide whether resuming is worth it, as tiles rather than
+        // colour-edged chips: the value is the message, the label just names it.
+        int tw = (cw - 16) / 2;
+        Surface(cx, top + 140, tw, 78, RushhouseUIKit.SurfaceHi, 20, false, "pause-served");
+        AddText(served + "/" + goal, cx + tw / 2, top + 172, 24, served >= goal ? RushhouseUIKit.Teal : RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleCenter, "pause-served-v");
+        AddText("SERVED", cx + tw / 2, top + 200, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "pause-served-l");
+        Surface(cx + tw + 16, top + 140, tw, 78, RushhouseUIKit.SurfaceHi, 20, false, "pause-earned");
+        AddText("$" + earned, cx + tw + 16 + tw / 2, top + 172, 24, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "pause-earned-v");
+        AddText("EARNED", cx + tw + 16 + tw / 2, top + 200, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "pause-earned-l");
 
-        AddIconButton("RESUME", "ic_open", px + 22, 730, pw - 44, 72, mint, () => { paused = false; BuildPlayUI(); }, "pause-resume");
-        AddIconButton("QUIT TO MENU", "ic_back", px + 22, 812, pw - 44, 52, red, () => { paused = false; ShowMenu(); }, "pause-quit");
+        y = top + 250;
+        ToggleRow("MUSIC", save.musicOn, y, () => { save.musicOn = !save.musicOn; }); y += rowStep;
+        ToggleRow("SOUND EFFECTS", save.sfxOn, y, () => { save.sfxOn = !save.sfxOn; }); y += rowStep;
+        ToggleRow("VIBRATION", save.hapticsOn, y, () => { save.hapticsOn = !save.hapticsOn; }); y += rowStep;
+
+        y += 10;
+        SolidButton("RESUME", cx, y, cw, 76, RushhouseUIKit.Primary, Color.white,
+                    () => { paused = false; BuildPlayUI(); }, "pause-resume", 20);
+        SolidButton("QUIT TO MENU", cx, y + 88, cw, 60, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Muted,
+                    () => { paused = false; ShowMenu(); }, "pause-quit", 15);
         AnimateUIIn("pause", .018f, .2f);
     }
 
@@ -667,57 +716,61 @@ public class RushhouseUnityGame : MonoBehaviour
     {
         // the veil is drawn over the live menu, so a toggle redraw must rebuild both layers
         void Reopen() { ShowMenu(); DrawSettingsOverlay(); }
-        AddPanel(0, 0, W, H, new Color(.02f, .03f, .05f, .88f), uiRoot, "set-veil");
-        const int px = 56, pw = 608;
         // The consent row only exists for players a CMP applies to (EEA/UK/Switzerland), so the
-        // card grows for them rather than leaving a gap for everyone else.
+        // sheet grows for them rather than leaving a gap for everyone else.
         bool privacy = RushhouseConsent.PrivacyOptionsRequired;
-        // Five toggles now (audio x3 + controls x2), so the card is sized from the row count rather
-        // than from two hand-tuned constants that had to be edited every time a row was added.
-        const int rowTop = 452, rowStep = 56;
-        const int rows = 5;
-        // Everything below the rows is positioned from the same running y, so adding a sixth toggle
-        // later moves the buttons and resizes the card automatically instead of silently overlapping
-        // them the way two hand-tuned constants did.
-        int lastRowEnd = rowTop + 40 + rows * rowStep;          // 492 + 5*56 = 772
-        int privacyY = lastRowEnd + 4;
-        int doneY2 = privacy ? privacyY + 62 : privacyY;
-        int creditY = doneY2 + 78;
-        AddCard(px, 420, pw, creditY - 420 + 30, gold, "settings");
-        AddText("SETTINGS", 360, 452, 30, gold, FontStyle.Bold);
-        int y = rowTop + 40;
-        PauseToggle("MUSIC", save.musicOn, y, () => { save.musicOn = !save.musicOn; }, Reopen); y += rowStep;
-        PauseToggle("SOUND EFFECTS", save.sfxOn, y, () => { save.sfxOn = !save.sfxOn; }, Reopen); y += rowStep;
-        PauseToggle("VIBRATION", save.hapticsOn, y, () => { save.hapticsOn = !save.hapticsOn; }, Reopen); y += rowStep;
+        const int rows = 5, rowStep = 62;
+        int height = 96 + rows * rowStep + (privacy ? 72 : 0) + 152;
+        int top = Mathf.Max(120, (H - height) / 2);
+        int sx = OverlaySheet(top, height, "set");
+        int cw = W - sx * 2 - 44, cx = sx + 22;
+
+        AddText("SETTINGS", W / 2, top + 54, 26, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleCenter, "set-title");
+
+        int y = top + 96;
+        ToggleRow("MUSIC", save.musicOn, y, () => { save.musicOn = !save.musicOn; }, Reopen); y += rowStep;
+        ToggleRow("SOUND EFFECTS", save.sfxOn, y, () => { save.sfxOn = !save.sfxOn; }, Reopen); y += rowStep;
+        ToggleRow("VIBRATION", save.hapticsOn, y, () => { save.hapticsOn = !save.hapticsOn; }, Reopen); y += rowStep;
         // Turning the pads off is only safe because tap-to-walk, hold-to-keep-walking and
-        // hold-on-a-station-to-work-it all exist; see UpdatePlay. The reserved band also drops to 0 so the
-        // strip the pads used to reserve becomes tappable world again.
-        PauseToggle("ON-SCREEN BUTTONS", save.touchButtons, y,
-            () => { save.touchButtons = !save.touchButtons; }, Reopen); y += rowStep;
-        PauseToggle("CAMERA FOLLOWS CHEF", save.cameraFollow, y,
-            () => { save.cameraFollow = !save.cameraFollow; camFollowPos = playerPos; }, Reopen); y += rowStep;
+        // hold-on-a-station-to-work-it all exist; see UpdatePlay. The reserved band also drops to 0 so
+        // the strip the pads used to reserve becomes tappable world again.
+        ToggleRow("ON-SCREEN BUTTONS", save.touchButtons, y,
+                  () => { save.touchButtons = !save.touchButtons; }, Reopen); y += rowStep;
+        ToggleRow("CAMERA FOLLOWS CHEF", save.cameraFollow, y,
+                  () => { save.cameraFollow = !save.cameraFollow; camFollowPos = playerPos; }, Reopen); y += rowStep;
+
+        y += 6;
         // GDPR requires the consent choice to stay changeable after the first run, and the privacy
         // policy promises this exact entry. Google's UMP owns the form; we only re-open it.
-        if (privacy)
-            AddIconButton("PRIVACY OPTIONS", "ic_open", px + 22, privacyY, pw - 44, 52, gold,
-                () => RushhouseConsent.ShowPrivacyOptions(Reopen), "set-privacy");
-        AddIconButton("DONE", "ic_open", px + 22, doneY2, pw - 44, 52, mint, ShowMenu, "set-done");
+        if (privacy) {
+            SolidButton("PRIVACY OPTIONS", cx, y, cw, 56, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink,
+                        () => RushhouseConsent.ShowPrivacyOptions(Reopen), "set-privacy", 14);
+            y += 72;
+        }
+        SolidButton("DONE", cx, y, cw, 72, RushhouseUIKit.Primary, Color.white, ShowMenu, "set-done", 20);
         // Required attribution: the soundtrack is Stable Audio 3 output under the Stability AI
         // Community License, which obliges this exact string wherever the game is distributed.
         // It also lives in NOTICE and the README; this is the copy a player can actually see.
-        AddText("Music powered by Stability AI", 360, creditY, 10, muted, FontStyle.Normal);
+        AddText("Music powered by Stability AI", W / 2, y + 100, 10, RushhouseUIKit.Muted, FontStyle.Normal,
+                TextAnchor.MiddleCenter, "set-credit");
         AnimateUIIn("settings", .018f, .2f);
     }
 
-    // one settings row: name on the left, an ON/OFF pill on the right, whole row tappable
-    void PauseToggle(string label, bool on, int y, System.Action flip, System.Action redraw = null)
+    // One settings row: name on the left, a real switch on the right, whole row tappable.
+    // The switch is a track plus a knob that MOVES, because an "ON"/"OFF" word pill reads as a
+    // button you press to get the other state -- players turned music off trying to turn it on.
+    void ToggleRow(string label, bool on, int y, Action flip, Action redraw = null)
     {
-        const int px = 56, pw = 608;
-        AddHitArea(px + 22, y, pw - 44, 52, () => { flip(); Persist(); suppressAnim = true; (redraw ?? DrawPauseOverlay)(); }, "pause-toggle");
-        AddChip(px + 22, y, pw - 44, 52, on ? mint : muted, "pause-toggle-bg", on ? .12f : .05f);
-        AddText(label, px + 44, y + 26, 15, on ? Color.white : muted, FontStyle.Bold, TextAnchor.MiddleLeft, "pause-toggle-label");
-        AddPanel(px + pw - 132, y + 11, 88, 30, on ? new Color(.24f, .78f, .58f, .9f) : new Color(1, 1, 1, .1f), uiRoot, "pause-pill");
-        AddText(on ? "ON" : "OFF", px + pw - 88, y + 26, 12, on ? new Color(.03f, .06f, .05f) : muted, FontStyle.Bold);
+        const int sx = 40;
+        int cx = sx + 22, cw = W - sx * 2 - 44, h = 54;
+        Surface(cx, y, cw, h, on ? RushhouseUIKit.SurfaceHi : new Color(1, 1, 1, .04f), 18, false, "toggle-bg");
+        AddText(label, cx + 20, y + h / 2, 14, on ? RushhouseUIKit.Ink : RushhouseUIKit.Muted,
+                FontStyle.Bold, TextAnchor.MiddleLeft, "toggle-label");
+        const int trackW = 62, trackH = 30, knob = 22;
+        int tx = cx + cw - trackW - 18, ty = y + (h - trackH) / 2;
+        Surface(tx, ty, trackW, trackH, on ? RushhouseUIKit.Teal : new Color(1, 1, 1, .12f), 15, false, "toggle-track");
+        Surface(on ? tx + trackW - knob - 4 : tx + 4, ty + 4, knob, knob, Color.white, 11, false, "toggle-knob");
+        AddHitArea(cx, y, cw, h, () => { flip(); Persist(); suppressAnim = true; (redraw ?? DrawPauseOverlay)(); }, "toggle-hit");
     }
 
     // 5 filled/dim pips = the restaurant's star level (glyph stars can render as boxes in this font)
@@ -886,14 +939,16 @@ public class RushhouseUnityGame : MonoBehaviour
         if (!adOverlayUp) return;
         ClearUI();
         AddPanel(0, 0, W, H, new Color(.01f, .015f, .02f, .96f), uiRoot, "ad-veil");
-        AddCard(76, 500, 568, 244, gold, "ad-card");
-        AddText("LOADING AD", 360, 560, 26, gold, FontStyle.Bold);
-        AddText(AdRewardLine(adPending), 360, 596, 13, muted, FontStyle.Bold);
-        AddPanel(120, 636, 480, 16, new Color(1, 1, 1, .08f), uiRoot, "ad-track");
-        int w = Mathf.Max(4, Mathf.RoundToInt(480 * Mathf.Clamp01(adProgress)));
-        AddPanel(120, 636, w, 16, mint, uiRoot, "ad-fill");
-        AddText(Mathf.RoundToInt(adProgress * 100) + "%", 360, 686, 12, text, FontStyle.Bold);
-        AddText("Reward is paid when the ad finishes", 360, 716, 10, muted, FontStyle.Normal);
+        Surface(76, 496, 568, 252, RushhouseUIKit.Surface, 28, true, "ad-card");
+        AddText("LOADING AD", 360, 556, 24, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleCenter, "ad-title");
+        AddText(AdRewardLine(adPending), 360, 592, 13, violet, FontStyle.Bold, TextAnchor.MiddleCenter, "ad-reward");
+        // Rounded track and fill, so the one progress bar the player stares at is not the only
+        // square-cornered thing left in the game.
+        Surface(120, 636, 480, 16, new Color(1, 1, 1, .08f), 8, false, "ad-track");
+        int w = Mathf.Max(16, Mathf.RoundToInt(480 * Mathf.Clamp01(adProgress)));
+        Surface(120, 636, w, 16, RushhouseUIKit.Teal, 8, false, "ad-fill");
+        AddText(Mathf.RoundToInt(adProgress * 100) + "%", 360, 686, 12, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleCenter, "ad-pct");
+        AddText("Reward is paid when the ad finishes", 360, 716, 10, RushhouseUIKit.Muted, FontStyle.Normal, TextAnchor.MiddleCenter, "ad-note");
     }
 
     static string AdRewardLine(string kind)
@@ -914,16 +969,18 @@ public class RushhouseUnityGame : MonoBehaviour
         paused = true;
         ClearUI();
         AddPanel(0, 0, W, H, new Color(.02f, .02f, .04f, .92f), uiRoot, "sc-veil");
-        AddCard(56, 380, 608, 400, red, "sc-card");
-        AddText("SERVICE COLLAPSING", 360, 436, 30, red, FontStyle.Bold);
-        AddText("Five complaints. One more and the day is lost.", 360, 472, 12, muted, FontStyle.Bold);
-        AddChip(80, 506, 560, 82, mint, "sc-offer", .12f);
-        AddText("CLEAR 2 COMPLAINTS", 360, 534, 18, mint, FontStyle.Bold);
-        AddText("and carry on serving this shift", 360, 562, 11, muted, FontStyle.Bold);
+        Surface(56, 380, 608, 400, RushhouseUIKit.Surface, 30, true, "sc-card");
+        AddText("SERVICE COLLAPSING", 360, 436, 28, RushhouseUIKit.Danger, FontStyle.Bold, TextAnchor.MiddleCenter, "sc-title");
+        AddText("Five complaints. One more and the day is lost.", 360, 472, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "sc-sub");
+        Surface(80, 506, 560, 82, RushhouseUIKit.SurfaceHi, 20, false, "sc-offer");
+        AddText("CLEAR 2 COMPLAINTS", 360, 534, 18, RushhouseUIKit.Teal, FontStyle.Bold, TextAnchor.MiddleCenter, "sc-offer-t");
+        AddText("and carry on serving this shift", 360, 562, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "sc-offer-s");
         AddAdButton("WATCH AD", 80, 606, 560, 74, "second",
             () => { paused = false; BuildPlayUI(); }, "sc-watch");
-        AddIconButton("GIVE UP", "ic_back", 80, 694, 560, 60, muted,
-            () => { paused = false; FinishDay(false); }, "sc-quit");
+        // Declining stays quiet on purpose: it is a real choice, not a punishment, and a red slab
+        // for "give up" makes the ad look like the only way out.
+        SolidButton("GIVE UP", 80, 694, 560, 60, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Muted,
+            () => { paused = false; FinishDay(false); }, "sc-quit", 15);
     }
 
     // A consistent "watch an ad for X" button. Purple so it never reads as a normal action.
@@ -1126,10 +1183,13 @@ public class RushhouseUnityGame : MonoBehaviour
                 FontStyle.Bold, TextAnchor.MiddleLeft);
 
             if (!owned && rendered) {
-                AddChip(x + 196, y + 74, 100, 32, affordable ? violet : muted, "wr-price" + i, .16f);
+                Surface(x + 196, y + 74, 100, 32, new Color(affordable ? violet.r : RushhouseUIKit.Muted.r,
+                                                              affordable ? violet.g : RushhouseUIKit.Muted.g,
+                                                              affordable ? violet.b : RushhouseUIKit.Muted.b, .16f),
+                        16, false, "wr-price" + i);
                 AddText(o.price + " TK", x + 246, y + 90, 13, affordable ? violet : muted, FontStyle.Bold);
             } else if (equipped) {
-                AddChip(x + 196, y + 74, 100, 32, mint, "wr-eq" + i, .16f);
+                Surface(x + 196, y + 74, 100, 32, new Color(RushhouseUIKit.Teal.r, RushhouseUIKit.Teal.g, RushhouseUIKit.Teal.b, .16f), 16, false, "wr-eq" + i);
                 AddText("WEARING", x + 246, y + 90, 11, mint, FontStyle.Bold);
             }
         }
@@ -1591,7 +1651,9 @@ public class RushhouseUnityGame : MonoBehaviour
         // meaningless on its own; seeing the current levels together is what makes a purchase feel
         // like a decision rather than a guess. Named "studio-*" so a tab switch (which wipes
         // "shop-*") leaves it alone -- these levels do not change per tab.
-        int statsY = 760;
+        // Pinned above BACK rather than under the grid: the three tabs have different row counts,
+        // so a strip that floats after the last card lands somewhere different on every tab.
+        int statsY = 908;
         AddText("YOUR RESTAURANT", M, statsY, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "studio-stats-title");
         (string, int)[] stats = {
             ("SPEED", save.speed), ("COOK", save.grill), ("PREP", save.prepUpgrade),
@@ -1599,11 +1661,13 @@ public class RushhouseUnityGame : MonoBehaviour
         };
         int sw = (CW - 40) / 3;
         for (int i = 0; i < stats.Length; i++) {
-            int sx = M + (i % 3) * (sw + 20), sy = statsY + 24 + (i / 3) * 76;
-            Surface(sx, sy, sw, 64, RushhouseUIKit.Surface, 16, false, "studio-stat" + i);
-            AddText(stats[i].Item1, sx + sw / 2, sy + 22, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "studio-stat-lab" + i);
-            AddText("Lv " + stats[i].Item2, sx + sw / 2, sy + 44, 16,
-                    stats[i].Item2 > 0 ? RushhouseUIKit.Teal : RushhouseUIKit.Muted, FontStyle.Bold,
+            int sx = M + (i % 3) * (sw + 20), sy = statsY + 26 + (i / 3) * 92;
+            // SurfaceHi, and a level of 0 in Ink rather than Muted: "you have not bought this yet"
+            // is not the same statement as "this is unavailable", and Muted already means the second.
+            Surface(sx, sy, sw, 80, RushhouseUIKit.SurfaceHi, 18, false, "studio-stat" + i);
+            AddText(stats[i].Item1, sx + sw / 2, sy + 26, 11, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "studio-stat-lab" + i);
+            AddText("Lv " + stats[i].Item2, sx + sw / 2, sy + 54, 18,
+                    stats[i].Item2 > 0 ? RushhouseUIKit.Teal : RushhouseUIKit.Ink, FontStyle.Bold,
                     TextAnchor.MiddleCenter, "studio-stat-val" + i);
         }
 
@@ -1663,26 +1727,26 @@ public class RushhouseUnityGame : MonoBehaviour
         if (tab == "upgrades") {
             AddShopCard("SHOES", "move +" + save.speed, Cost(90, save.speed), leftX, 232, mint, () => BuyUpgrade("speed"));
             AddShopCard("HOB", "cook +" + save.grill, Cost(110, save.grill), rightX, 232, red, () => BuyUpgrade("grill"));
-            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 352, green, () => BuyUpgrade("prep"));
-            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 352, blue, () => BuyUpgrade("patience"));
-            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 472, mint, () => BuyUpgrade("sink"));
-            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 472, gold, () => BuyUpgrade("room"));
-            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 592, violet, () => BuyUpgrade("decor"));
-            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 592, green, () => BuyUpgrade("marketing"));
+            AddShopCard("PREP", "prep +" + save.prepUpgrade, Cost(85, save.prepUpgrade), leftX, 372, green, () => BuyUpgrade("prep"));
+            AddShopCard("COMFORT", "patience +" + save.patience, Cost(100, save.patience), rightX, 372, blue, () => BuyUpgrade("patience"));
+            AddShopCard("WATER", "wash +" + save.sinkUpgrade, Cost(95, save.sinkUpgrade), leftX, 512, mint, () => BuyUpgrade("sink"));
+            AddShopCard("BAY", "space +" + save.room, Cost(220, save.room), rightX, 512, gold, () => BuyUpgrade("room"));
+            AddShopCard("DECOR", "tips +" + save.decor, Cost(130, save.decor), leftX, 652, violet, () => BuyUpgrade("decor"));
+            AddShopCard("ADS", "flow +" + save.marketing, Cost(140, save.marketing), rightX, 652, green, () => BuyUpgrade("marketing"));
         } else if (tab == "equipment") {
             AddShopCard("COUNTER", $"floor {Math.Min(OwnedCount("counter"), MaxOwned("counter"))}/{MaxOwned("counter")}", EquipmentCost("counter"), leftX, 232, violet, () => BuyEquipment("counter"), OwnedCount("counter") >= MaxOwned("counter"));
             AddShopCard("TABLE", $"floor {Math.Min(save.table, MaxOwned("table"))}/{MaxOwned("table")}", EquipmentCost("table"), rightX, 232, gold, () => BuyEquipment("table"), save.table >= MaxOwned("table"));
-            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 352, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
-            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 352, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
-            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 472, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
+            AddShopCard("HOB", $"floor {Math.Min(save.hob, MaxOwned("hob"))}/{MaxOwned("hob")}", EquipmentCost("hob"), leftX, 372, red, () => BuyEquipment("hob"), save.hob >= MaxOwned("hob"));
+            AddShopCard("SINK", $"owned {save.sink}/{MaxOwned("sink")}", EquipmentCost("sink"), rightX, 372, blue, () => BuyEquipment("sink"), save.sink >= MaxOwned("sink"));
+            AddShopCard("DRINK", $"owned {save.drink}/{MaxOwned("drink")}", EquipmentCost("drink"), leftX, 512, mint, () => BuyEquipment("drink"), save.drink >= MaxOwned("drink"));
             if (save.theme == "pizza")
-                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 472, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
+                AddShopCard("OVEN", $"owned {save.oven}/{MaxOwned("oven")}", EquipmentCost("oven"), rightX, 512, red, () => BuyEquipment("oven"), save.oven >= MaxOwned("oven"));
             else if (save.theme == "coffee")
-                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 472, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
+                AddShopCard("ESPRESSO", $"owned {save.espresso}/2", EquipmentCost("espresso"), rightX, 512, violet, () => BuyEquipment("espresso"), save.espresso >= 2);
         } else {
             AddShopCard("WAITER", "takes orders + serves", StaffCost(save.waiter), leftX, 232, gold, () => BuyStaff("waiter"), save.waiter >= 3);
-            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 352, red, () => BuyStaff("cook"), save.cook >= 3);
-            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 472, blue, () => BuyStaff("washer"), save.washer >= 3);
+            AddShopCard("COOK", "works the hobs", StaffCost(save.cook), leftX, 372, red, () => BuyStaff("cook"), save.cook >= 3);
+            AddShopCard("WASHER", "clears + washes", StaffCost(save.washer), leftX, 512, blue, () => BuyStaff("washer"), save.washer >= 3);
             AddShopCard("PREPPER", "chops + plates", StaffCost(save.prepper), rightX, 232, green, () => BuyStaff("prepper"), save.prepper >= 3);
         }
         MarkBestBuy();
@@ -1714,7 +1778,7 @@ public class RushhouseUnityGame : MonoBehaviour
         // Soft elevated card, no stroke. The old version leaned on a coloured border to tell cards
         // apart, which is exactly the framed look being removed; the accent now lives in a small
         // colour bar behind the icon so the card itself stays calm.
-        const int cardW = 308, cardH = 104;
+        const int cardW = 308, cardH = 124;
         bool broke = !soldOut && save.coins < cost;
         if (!soldOut && !broke) {
             var hit = new GameObject("shop-card", typeof(Image), typeof(Button));
@@ -1731,11 +1795,11 @@ public class RushhouseUnityGame : MonoBehaviour
         Surface(x, y, cardW, cardH, soldOut ? new Color(.11f, .13f, .16f) : RushhouseUIKit.SurfaceHi,
                 18, !soldOut, "shop" + title);
         Color iconTint = soldOut ? new Color(1, 1, 1, .3f) : broke ? new Color(1, 1, 1, .55f) : Color.white;
-        Surface(x + 14, y + 18, 68, 68, new Color(stroke.r, stroke.g, stroke.b, soldOut ? .10f : .22f), 18, false, "shop-icon-bg");
-        AddUIImage("shop-icon-" + title, ShopIconSprite(title), x + 20, y + 24, 56, 56, iconTint, true);
-        AddText(title, x + 96, y + 38, 17, soldOut ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
+        Surface(x + 14, y + 22, 80, 80, new Color(stroke.r, stroke.g, stroke.b, soldOut ? .10f : .22f), 20, false, "shop-icon-bg");
+        AddUIImage("shop-icon-" + title, ShopIconSprite(title), x + 22, y + 30, 64, 64, iconTint, true);
+        AddText(title, x + 108, y + 48, 18, soldOut ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
                 FontStyle.Bold, TextAnchor.MiddleLeft, "shop-title");
-        AddText(desc, x + 96, y + 62, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-desc");
+        AddText(desc, x + 108, y + 74, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "shop-desc");
         // Record affordable cards so the cheapest can be badged AFTER the grid is laid out. Doing
         // it inline is impossible -- a card cannot know it is the cheapest until the others exist --
         // and recomputing the prices in a second place would silently drift from these ones.
@@ -1745,8 +1809,8 @@ public class RushhouseUnityGame : MonoBehaviour
             // Price pill: gold when affordable, red when not — the only feedback an inert card gets.
             Color pc = broke ? RushhouseUIKit.Danger : RushhouseUIKit.Gold;
             int pw = 68;
-            Surface(x + cardW - pw - 14, y + 56, pw, 30, new Color(pc.r, pc.g, pc.b, .16f), 15, false, "shop-price-bg");
-            AddText(cost.ToString(), x + cardW - 14 - pw / 2, y + 67, 15, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-cost");
+            Surface(x + cardW - pw - 14, y + 66, pw, 32, new Color(pc.r, pc.g, pc.b, .16f), 16, false, "shop-price-bg");
+            AddText(cost.ToString(), x + cardW - 14 - pw / 2, y + 78, 15, pc, FontStyle.Bold, TextAnchor.MiddleCenter, "shop-cost");
         }
     }
 
@@ -1843,7 +1907,10 @@ public class RushhouseUnityGame : MonoBehaviour
 
         // Rows sized to the count so the list always fills the page instead of leaving a dead half.
         int top = 152, bottom = 1150;
-        int rowH = Mathf.Clamp((bottom - top) / Mathf.Max(1, list.Count), 76, 104);
+        // The upper clamp was 104, which is why a seven-recipe menu stopped two thirds down the page
+        // and left the rest empty. Rows may grow to 140 -- past that a single dish starts to read as
+        // a banner rather than a list item.
+        int rowH = Mathf.Clamp((bottom - top) / Mathf.Max(1, list.Count), 76, 140);
         int y = top;
         foreach (var r in list) {
             bool locked = r.day > save.day;
@@ -2064,84 +2131,50 @@ public class RushhouseUnityGame : MonoBehaviour
         int listH = parts.Count * rowH + Mathf.Max(0, parts.Count - 1) * rowGap;
         int h = pad + headerH + modH + 34 + listH + footerH + pad;
         int top = Mathf.Clamp((H - h) / 2, 96, H - h - 24);
-        AddCard(cardX, top, cardW, h, gold, "od");
+        Surface(cardX, top, cardW, h, RushhouseUIKit.Surface, 28, true, "od");
 
         // header: dish thumbnail + name + reward, side by side (compact, saves the old hero's height)
         int hx = cardX + pad, hy = top + pad + 8;
         AddPanel(hx, hy, 108, 108, new Color(1, 1, 1, .06f), uiRoot, "od-thumb-bg");
         AddUIImage("od-dish", FinalDishSprite(r.id), hx + 6, hy + 6, 96, 96, Color.white, true);
-        AddText(r.label, hx + 130, hy + 34, 27, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText("+" + r.value + " COINS", hx + 130, hy + 74, 16, mint, FontStyle.Bold, TextAnchor.MiddleLeft);
+        AddText(r.label, hx + 130, hy + 34, 27, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "od-name");
+        AddText("+" + r.value + " COINS", hx + 130, hy + 74, 16, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleLeft, "od-value");
         if (specialRecipe != null && specialRecipe.id == r.id)
-            AddText("DAILY SPECIAL +40%", hx + 130, hy + 98, 12, violet, FontStyle.Bold, TextAnchor.MiddleLeft);
+            AddText("DAILY SPECIAL +40%", hx + 130, hy + 98, 12, violet, FontStyle.Bold, TextAnchor.MiddleLeft, "od-special");
 
         int y = top + pad + headerH;
         if (hasMod) {
-            Color mc = guest.orderMod[0] == 'N' ? red : gold;
-            AddChip(cardX + pad, y, cardW - pad * 2, 38, mc, "od-mod", .16f);
-            AddText(guest.orderMod, cardX + pad + 18, y + 19, 16, mc, FontStyle.Bold, TextAnchor.MiddleLeft);
+            Color mc = guest.orderMod[0] == 'N' ? RushhouseUIKit.Danger : RushhouseUIKit.Gold;
+            Surface(cardX + pad, y, cardW - pad * 2, 38, new Color(mc.r, mc.g, mc.b, .16f), 12, false, "od-mod");
+            AddText(guest.orderMod, cardX + pad + 18, y + 19, 16, mc, FontStyle.Bold, TextAnchor.MiddleLeft, "od-mod-t");
             y += modH;
         }
-        AddText("CONTAINS", cardX + pad, y + 12, 13, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-        AddText(parts.Count + " ITEMS", cardX + cardW - pad, y + 12, 13, muted, FontStyle.Bold, TextAnchor.MiddleRight);
+        AddText("CONTAINS", cardX + pad, y + 12, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "od-c");
+        AddText(parts.Count + " ITEMS", cardX + cardW - pad, y + 12, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "od-n");
         AddPanel(cardX + pad, y + 26, cardW - pad * 2, 2, new Color(1, 1, 1, .1f), uiRoot, "od-rule");
         y += 34;
 
         for (int i = 0; i < parts.Count; i++) {
             string how = NeedsStation(Item.Ingredient(parts[i], "raw")) ? "COOK" : NeedsPrep(parts[i]) ? "CHOP" : "";
-            Color tone = how == "COOK" ? red : how == "CHOP" ? green : mint;
-            AddChip(cardX + pad, y, cardW - pad * 2, rowH, tone, "od-row" + i, .09f);
+            Color tone = how == "COOK" ? RushhouseUIKit.Primary : how == "CHOP" ? green : RushhouseUIKit.Teal;
+            Surface(cardX + pad, y, cardW - pad * 2, rowH, RushhouseUIKit.SurfaceHi, 16, false, "od-row" + i);
             AddUIImage("od-ing-" + i, FoodSprite(FoodSpriteName(parts[i], CarryStateForPart(parts[i]))), cardX + pad + 16, y + 5, 46, 46, Color.white, true);
-            AddText((i + 1).ToString(), cardX + pad + 76, y + rowH / 2, 13, muted, FontStyle.Bold, TextAnchor.MiddleLeft);
-            AddText(parts[i].ToUpperInvariant(), cardX + pad + 104, y + rowH / 2, 18, text, FontStyle.Bold, TextAnchor.MiddleLeft);
+            AddText((i + 1).ToString(), cardX + pad + 76, y + rowH / 2, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "od-i" + i);
+            AddText(parts[i].ToUpperInvariant(), cardX + pad + 104, y + rowH / 2, 18, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "od-p" + i);
             if (how != "") {
                 int bw = 74, bx = cardX + cardW - pad - bw - 12;
-                AddPanel(bx, y + 15, bw, 26, new Color(tone.r, tone.g, tone.b, .22f), uiRoot, "od-tag" + i);
-                AddText(how, bx + bw / 2, y + 28, 12, tone, FontStyle.Bold);
+                Surface(bx, y + 15, bw, 26, new Color(tone.r, tone.g, tone.b, .20f), 13, false, "od-tag" + i);
+                AddText(how, bx + bw / 2, y + 28, 12, tone, FontStyle.Bold, TextAnchor.MiddleCenter, "od-tag-t" + i);
             }
             y += rowH + rowGap;
         }
         y = top + h - pad - 74;
-        AddIconButton("CLOSE", "ic_back", cardX + pad, y, cardW - pad * 2, 68, blue, () => { detailRecipe = null; BuildPlayUI(); }, "od-close");
+        SolidButton("CLOSE", cardX + pad, y, cardW - pad * 2, 68, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink,
+                    () => { detailRecipe = null; BuildPlayUI(); }, "od-close", 18);
     }
 
     // Tap a station (play OR layout) → a floating speech bubble above it with its name + what it does.
     // Drawn in world space (from RebuildWorld) so it sits over the prop like a balloon.
-    void DrawStationBubble()
-    {
-        // Info balloon is a FLOORPLAN-only feature now (the user found it distracting mid-cook). In
-        // play you read a station by tapping a TICKET (order detail), not the prop.
-        if (screen != ScreenMode.Layout) return;
-        if (infoTimer <= 0 || infoAppliance == null || !appliances.Contains(infoAppliance)) return;
-        var a = infoAppliance;
-        Rect rect = CellRect(a.c, a.r, a.w, a.h);
-        Color stroke = ApplianceTagColor(a) == muted ? gold : ApplianceTagColor(a);
-        spriteDepthBoost = 12f;   // draw the whole card in FRONT of every prop mesh
-        // rich readable balloon: shadow → framed panel art → accent bar → station THUMBNAIL (the
-        // pre-3D render of this exact prop) → title / divider / description. Tap empty floor to close.
-        float bw = 3.8f, bh = 1.5f;
-        Vector2 anchor = new Vector2(rect.center.x, rect.yMax + ApplianceVisualSize(a, rect.size).y * .45f);
-        float roomHalf = CellRect(0, 0, Cols, Rows).xMax;
-        float bx = Mathf.Clamp(anchor.x, -roomHalf + bw * .55f, roomHalf - bw * .55f);
-        Vector2 bc = new Vector2(bx, anchor.y + bh * .5f + .24f);
-        MakeRect("sb-sh", bc + new Vector2(.07f, -.09f), new Vector2(bw + .12f, bh + .12f), new Color(0, 0, 0, .38f), 60);
-        MakeRect("sb-frame", bc, new Vector2(bw + .06f, bh + .06f), Color.Lerp(stroke, Color.white, .2f), 61);
-        var panel = MakeStretch("sb-bg", MenuSprite("shop_panel"), bc, new Vector2(bw, bh), Color.white, 62);
-        if (!panel.GetComponent<SpriteRenderer>().sprite) MakeRect("sb-bg2", bc, new Vector2(bw, bh), new Color(.07f, .09f, .13f, .97f), 62);
-        MakeRect("sb-accent", bc + new Vector2(0, bh * .5f - .05f), new Vector2(bw, .09f), stroke, 64);
-        var tail = MakeRect("sb-tail", anchor + new Vector2(0, .1f), new Vector2(.28f, .28f), Color.Lerp(stroke, Color.white, .2f), 61);
-        SetBillboardAngle(tail, 45f);
-        // station thumbnail chip on the left
-        float iconX = bc.x - bw * .5f + .5f;
-        MakeRect("sb-icon-chip", new Vector2(iconX, bc.y - .02f), new Vector2(.78f, .78f), new Color(0, 0, 0, .35f), 63);
-        MakeSprite("sb-icon", ObjectSprite(ApplianceSpriteName(a)), new Vector2(iconX, bc.y - .02f), new Vector2(.68f, .68f), Color.white, 64);
-        float tx = bc.x + .34f;
-        DrawWorldText(StationTitle(a), new Vector2(tx, bc.y + .32f), .032f, stroke, 64);
-        MakeRect("sb-div", new Vector2(tx, bc.y + .1f), new Vector2(bw * .5f, .028f), new Color(stroke.r, stroke.g, stroke.b, .45f), 64);
-        DrawWorldText(StationDescription(a), new Vector2(tx, bc.y - .22f), .023f, Color.white, 64);
-        spriteDepthBoost = 0f;
-    }
-
     void DrawGoalHud()
     {
         // Daily goals as a checklist card: a filled tick for done, a hollow marker for pending.
@@ -2200,13 +2233,32 @@ public class RushhouseUnityGame : MonoBehaviour
         AddText(save.coins.ToString(), W - M - 24, 60, 20, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleRight, "lay-coins");
         AddText("COINS", W - M - 24, 82, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "lay-coinlab");
 
-        // --- selection actions: only meaningful with something selected, so they read as a group --
+        // --- selection actions ------------------------------------------------------------------
+        // ROTATE and SEATS do nothing without a selection, so they say so rather than looking live
+        // and swallowing the tap. RESET is deliberately quiet: it throws away the whole layout.
+        var sel = selectedLayout;
         int aw = (CW - 16) / 3;
-        SolidButton("ROTATE", M, 128, aw, 64, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, RotateSelected, "lay-rotate", 15);
-        SolidButton("SEATS", M + aw + 8, 128, aw, 64, RushhouseUIKit.SurfaceHi, RushhouseUIKit.Ink, CycleSeats, "lay-seats", 15);
+        SolidButton("ROTATE", M, 128, aw, 64, sel != null ? RushhouseUIKit.SurfaceHi : RushhouseUIKit.Surface,
+                    sel != null ? RushhouseUIKit.Ink : RushhouseUIKit.Muted, RotateSelected, "lay-rotate", 15);
+        SolidButton("SEATS", M + aw + 8, 128, aw, 64, sel != null ? RushhouseUIKit.SurfaceHi : RushhouseUIKit.Surface,
+                    sel != null ? RushhouseUIKit.Ink : RushhouseUIKit.Muted, CycleSeats, "lay-seats", 15);
         SolidButton("RESET", M + (aw + 8) * 2, 128, aw, 64, RushhouseUIKit.Surface, RushhouseUIKit.Muted, ResetLayout, "lay-reset", 15);
 
-        if (messageTimer > 0) AddText(message, W / 2, 212, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "lay-msg");
+        // --- what is selected -------------------------------------------------------------------
+        // This replaces a balloon that floated OVER the room. Same information, plus room for a
+        // full sentence, and it never covers the floor being arranged.
+        Surface(M, 200, CW, 96, RushhouseUIKit.Surface, 20, sel != null, "lay-sel");
+        if (sel != null) {
+            Surface(M + 12, 212, 72, 72, new Color(1, 1, 1, .06f), 16, false, "lay-sel-chip");
+            AddUIImage("lay-sel-icon", ObjectSprite(ApplianceSpriteName(sel)), M + 20, 220, 56, 56, Color.white);
+            AddText(StationTitle(sel), M + 100, 234, 17, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "lay-sel-title");
+            AddText(StationDescription(sel), M + 100, 262, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "lay-sel-desc");
+        } else {
+            AddText("Tap a unit to select it, then drag to move", M + 20, 248, 13, RushhouseUIKit.Muted,
+                    FontStyle.Bold, TextAnchor.MiddleLeft, "lay-sel-none");
+        }
+
+        if (messageTimer > 0) AddText(message, W / 2, 316, 13, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "lay-msg");
         BuildLayoutStore();
 
         // --- bottom actions: BACK quiet, OPEN the primary --------------------------------------
@@ -2218,7 +2270,11 @@ public class RushhouseUnityGame : MonoBehaviour
     void BuildLayoutStore()
     {
         const int M = 24, CW = W - M * 2;
-        AddText("BUY UNITS", M, 964, 14, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "store-title");
+        // The shop was six cards and a heading floating directly on the room render, so the label
+        // sat on the kitchen floor and the section had no edge. One sheet behind it makes it a
+        // panel, and gives the cards something to sit on instead of the tiles.
+        Surface(M - 8, 936, CW + 16, 232, RushhouseUIKit.Surface, 24, true, "store-sheet");
+        AddText("BUY UNITS", M + 8, 964, 14, RushhouseUIKit.Ink, FontStyle.Bold, TextAnchor.MiddleLeft, "store-title");
         // Three columns on the grid: 3 * 208 + 2 * 24 gutters = 672 = CW.
         int cw = (CW - 32) / 3;
         AddLayoutBuyCard("table", M, 992, RushhouseUIKit.Gold);
@@ -2298,7 +2354,6 @@ public class RushhouseUnityGame : MonoBehaviour
         foreach (var w in workers) DrawWorker(w);
         DrawPlayer();
         foreach (var p in popups) DrawPopup(p);
-        DrawStationBubble();
         PrunePropPool();
     }
 
@@ -3040,17 +3095,23 @@ public class RushhouseUnityGame : MonoBehaviour
 
     // WHERE A CARRIED ITEM SITS ON THE BODY.
     //
-    // A character is a camera-facing quad CENTRED on its ground position, so the sprite's pivot is
-    // roughly waist height and everything is measured from there -- not from the floor. This figure
-    // was read off a render with the engine printing the character's pivot row beside it
-    // (RushhouseVisualVerifier.CaptureCarryAudit prints CLOSEUP lines for exactly this): the gloves
-    // land .36 of a world unit above the pivot, so that is where the item goes.
+    // Sprite pivots are the frame CENTRE (spritePivot 0.5,0.5 in the .meta), so this offset is
+    // measured from the middle of the sprite, and a drawn character quad is ~1.21 world units for a
+    // 320px frame (the engine prints it: RushhouseVisualVerifier.CaptureCarryAudit, CLOSEUP lines).
+    // The hands sit at frame row ~180 in every carry pose -- 20 rows below the centre, so
+    // 20/320 x 1.21 = .075 world units down.
     //
-    // What was actually broken was not this number, it was that CarryOffset's y was added ON TOP of
-    // it. A character facing AWAY gets +.13 there to put the item on the far side of the body, and
-    // .13 is most of a head: front-facing the plate sat at the chest, back-facing it sat on the
-    // hat. That is the "he carries it on his head" report, and why it only showed in some frames.
-    const float HandDrop = .357f;                   // camera-vertical units, from the character's centre
+    // Getting here took three tries and the two failures are worth naming, because both came from
+    // reading a picture instead of measuring one:
+    //   +.42  (original) -- .15 of a frame ABOVE centre, i.e. frame row 65, inside the chef's HAT.
+    //   +.357 (build 4)  -- same mistake re-derived. It survived review because it was checked on a
+    //                      PLATE facing the camera, where the item is wide enough to touch the
+    //                      hands even when its centre is on the hat; a lettuce held sideways showed
+    //                      it immediately.
+    // A colour scan for the grey gloves is not enough on its own either: the knees and boots are the
+    // same grey, and rows 205-236 are the KNEES. Check any future change against the side-facing
+    // ingredient (CaptureCarryIngredient), which is the least forgiving case.
+    const float HandDrop = -.075f;                  // camera-vertical units, from the character's centre
 
     static readonly float CameraCos = Mathf.Cos(CameraPitch * Mathf.Deg2Rad);
 
@@ -3423,7 +3484,6 @@ public class RushhouseUnityGame : MonoBehaviour
                     SetMessage("Going to " + ApplianceLabel(a), .65f);
                 }
             } else {
-                infoTimer = 0; infoAppliance = null;   // tapping empty floor closes the info balloon
                 if (WorldInsideGrid(p) && IsWalkablePosition(p, .16f)) {
                     moveTarget = p;
                     tapAction = null;
@@ -3471,9 +3531,9 @@ public class RushhouseUnityGame : MonoBehaviour
             }
         } else pointerHold = 0f;
 
-        // NOTE: no hover-info during play — it popped cards constantly while you were cooking. The
-        // hover preview lives on the FLOORPLAN screen only; in play you TAP a station to read it.
-        if (infoTimer > 0) infoTimer -= dt;
+        // NOTE: no station info during play — it popped cards constantly while you were cooking.
+        // Reading what a unit does belongs on the FLOORPLAN screen, where there is time to read and
+        // a fixed card to read it in.
         if (queue > 0 && SpawnCustomer()) queue--;
         spawnTimer -= dt;
         if (queueComplaintCooldown > 0) queueComplaintCooldown -= dt;
@@ -3526,13 +3586,6 @@ public class RushhouseUnityGame : MonoBehaviour
             else if (!adOverlayUp) FinishDay(false);
         }
         else if (served >= goal || shiftTime <= 0) FinishDay(served >= goal);   // goal reached OR closing time
-    }
-
-    void ShowStationInfo(Appliance a, float dur)
-    {
-        if (a == null) return;
-        if (infoAppliance != a) { infoAppliance = a; infoTimer = dur; }
-        else infoTimer = Mathf.Max(infoTimer, dur);
     }
 
     // screen point -> the canvas-space rect of a ticket row (canvas Y runs from the TOP)
@@ -5085,36 +5138,44 @@ public class RushhouseUnityGame : MonoBehaviour
         for (int i = 0; i < 3; i++) {
             bool on = i < starRating;
             int sx = W / 2 - 108 + i * 76, sy = 166;
-            Surface(sx, sy, 60, 60, on ? new Color(1f, .78f, .22f, 1f) : new Color(1, 1, 1, .07f), 30, on, "res-star" + i);
-            if (on) Surface(sx + 12, sy + 12, 36, 36, new Color(1f, .93f, .66f, 1f), 18, false, "res-star-in" + i);
+            // An empty socket at 7% alpha is invisible on this background, which defeats the point
+            // of drawing the unearned slots at all -- they exist to say "one more to get".
+            Surface(sx, sy, 64, 64, on ? new Color(1f, .78f, .22f, 1f) : new Color(1, 1, 1, .09f), 32, on, "res-star" + i);
+            if (on) Surface(sx + 13, sy + 13, 38, 38, new Color(1f, .93f, .66f, 1f), 19, false, "res-star-in" + i);
+            else Surface(sx + 8, sy + 8, 48, 48, RushhouseUIKit.Bg, 24, false, "res-star-hole" + i);
         }
 
         // The payout is the reward moment, so it is the biggest number on the screen.
-        int py = 254;
-        Surface(M, py, CW, 116, RushhouseUIKit.Surface, 24, true, "res-payout");
-        AddText("+" + earned, W / 2, py + 50, 46, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "res-earned");
-        AddText("COINS EARNED", W / 2, py + 88, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-earnedlab");
+        int py = 262;
+        Surface(M, py, CW, 140, RushhouseUIKit.Surface, 24, true, "res-payout");
+        AddText("+" + earned, W / 2, py + 58, 52, RushhouseUIKit.Gold, FontStyle.Bold, TextAnchor.MiddleCenter, "res-earned");
+        AddText("COINS EARNED", W / 2, py + 104, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-earnedlab");
 
         // Three glanceable tiles.
-        int tw = (CW - 24) / 3, ty = 394;
+        int tw = (CW - 24) / 3, ty = 426;
         void Tile(int i, string label, string value, Color vc) {
             int tx = M + i * (tw + 12);
-            Surface(tx, ty, tw, 92, RushhouseUIKit.Surface, 20, true, "res-tile" + i);
-            AddText(value, tx + tw / 2, ty + 36, 22, vc, FontStyle.Bold, TextAnchor.MiddleCenter, "res-tile-v" + i);
-            AddText(label, tx + tw / 2, ty + 66, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-tile-l" + i);
+            Surface(tx, ty, tw, 106, RushhouseUIKit.Surface, 20, true, "res-tile" + i);
+            AddText(value, tx + tw / 2, ty + 42, 24, vc, FontStyle.Bold, TextAnchor.MiddleCenter, "res-tile-v" + i);
+            AddText(label, tx + tw / 2, ty + 76, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleCenter, "res-tile-l" + i);
         }
         Tile(0, "SERVED", served + "/" + goal, served >= goal ? RushhouseUIKit.Teal : RushhouseUIKit.Ink);
         Tile(1, "TIPS", "+" + tips, RushhouseUIKit.Gold);
         Tile(2, "BEST COMBO", "x" + bestCombo, bestCombo >= 3 ? RushhouseUIKit.Gold : RushhouseUIKit.Ink);
 
         // Progress + bookkeeping, quiet.
-        int gy0 = 510;
-        Surface(M, gy0, CW, 150, RushhouseUIKit.Surface, 20, false, "res-progress");
-        int rowY = gy0 + 34;
+        int gy0 = 556;
+        const int bookRows = 4, bookStep = 42;
+        Surface(M, gy0, CW, 28 + bookRows * bookStep, RushhouseUIKit.Surface, 20, false, "res-progress");
+        int rowY = gy0 + 36;
         void Row(string k, string v, Color vc) {
-            AddText(k, M + 20, rowY, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-row");
-            AddText(v, M + CW - 20, rowY, 13, vc, FontStyle.Bold, TextAnchor.MiddleRight, "res-row");
-            rowY += 30;
+            // A separator per row rather than four rows floating in one box: at a glance the eye
+            // needs to pair a label with the number opposite it, and 470px of empty space between
+            // them is a long way to travel unaided.
+            if (rowY > gy0 + 36) AddPanel(M + 18, rowY - 21, CW - 36, 1, new Color(1, 1, 1, .05f), uiRoot, "res-rule");
+            AddText(k, M + 20, rowY, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-row");
+            AddText(v, M + CW - 20, rowY, 15, vc, FontStyle.Bold, TextAnchor.MiddleRight, "res-row");
+            rowY += bookStep;
         }
         Row("RESTAURANT STARS", save.stars + "/5" + (starDelta > 0 ? "   UP" : starDelta < 0 ? "   DOWN" : ""),
             starDelta > 0 ? RushhouseUIKit.Teal : starDelta < 0 ? RushhouseUIKit.Danger : RushhouseUIKit.Gold);
@@ -5124,40 +5185,48 @@ public class RushhouseUnityGame : MonoBehaviour
         Row("MISSED / WRONG", missed + " / " + wrongOrders, (missed + wrongOrders) > 0 ? RushhouseUIKit.Danger : RushhouseUIKit.Muted);
 
         // Goals, same tick language as the in-play card.
-        int y = gy0 + 166;
-        Surface(M, y, CW, 40 + dailyGoals.Count * 28 + 8, RushhouseUIKit.Surface, 20, false, "res-goals");
-        AddText("DAILY GOALS", M + 20, y + 24, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-goals-t");
-        int gy = y + 50;
+        int y = gy0 + 28 + bookRows * bookStep + 20;
+        const int goalStep = 38;
+        Surface(M, y, CW, 46 + dailyGoals.Count * goalStep + 10, RushhouseUIKit.Surface, 20, false, "res-goals");
+        AddText("DAILY GOALS", M + 20, y + 26, 12, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-goals-t");
+        int gy = y + 58;
         foreach (var g in dailyGoals) {
-            Surface(M + 20, gy - 6, 14, 14, g.done ? RushhouseUIKit.Teal : new Color(1, 1, 1, .12f), 4, false, "res-tick");
-            AddText(GoalLine(g), M + 46, gy, 12, g.done ? RushhouseUIKit.Ink : RushhouseUIKit.Muted,
+            Surface(M + 20, gy - 8, 16, 16, g.done ? RushhouseUIKit.Teal : new Color(1, 1, 1, .12f), 5, false, "res-tick");
+            AddText(GoalLine(g), M + 50, gy, 13, g.done ? RushhouseUIKit.Ink : RushhouseUIKit.Muted,
                     FontStyle.Bold, TextAnchor.MiddleLeft, "res-goal");
-            gy += 28;
+            gy += goalStep;
         }
-        y += 40 + dailyGoals.Count * 28 + 8 + 16;
+        y += 46 + dailyGoals.Count * goalStep + 10 + 20;
         const int cx = M, cw = CW, pad = 20;
 
         if (success && marketOffers.Count > 0) {
-            AddText("DAILY MARKET", cx + pad, y + 12, 18, gold, FontStyle.Bold, TextAnchor.MiddleLeft);
-            AddText("1 GOOD or up to 2 STANDARD", cx + cw - pad, y + 13, 11, muted, FontStyle.Bold, TextAnchor.MiddleRight);
+            // The market was the last block still built from the old primitives -- AddCard's border,
+            // AddButton's coloured stroke -- and it only appears after a winning day with offers, so
+            // it survived several passes over this screen unseen.
+            AddText("DAILY MARKET", cx + pad, y + 14, 13, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-mk-t");
+            AddText("1 GOOD or up to 2 STANDARD", cx + cw - pad, y + 14, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleRight, "res-mk-s");
             y += 34;
             int cardW = (cw - 16) / marketOffers.Count;
             for (int i = 0; i < marketOffers.Count; i++) {
                 var offer = marketOffers[i];
                 int idx = i, x = cx + i * (cardW + 8);
                 bool locked = MarketChoiceLocked(offer);
-                Color oc = offer.bought ? mint : locked ? muted : offer.color;
-                // hit area FIRST so the card art and its labels draw on top of it (a button added last
-                // painted over the whole card and the offer text vanished)
-                if (!offer.bought && !locked) AddButton("", x, y, cardW, 116, oc, () => BuyMarketOffer(idx), "market-card");
-                AddCard(x, y, cardW, 116, oc, "mk" + i);
-                AddPanel(x + 10, y + 14, 62, 20, new Color(oc.r, oc.g, oc.b, .22f), uiRoot, "mk-tier" + i);
-                AddText(offer.tier, x + 41, y + 24, 10, oc, FontStyle.Bold);
-                AddText(offer.label, x + 12, y + 52, 14, text, FontStyle.Bold, TextAnchor.MiddleLeft, "market-label");
-                AddText(offer.desc, x + 12, y + 74, 9, muted, FontStyle.Bold, TextAnchor.MiddleLeft, "market-desc");
-                AddText(offer.bought ? "OWNED" : locked ? "LOCKED" : offer.cost + " COINS", x + 12, y + 98, 12, offer.bought ? mint : locked ? muted : gold, FontStyle.Bold, TextAnchor.MiddleLeft, "market-cost");
+                Color oc = offer.bought ? RushhouseUIKit.Teal : locked ? RushhouseUIKit.Muted : offer.color;
+                Surface(x, y, cardW, 126, offer.bought || locked ? RushhouseUIKit.Surface : RushhouseUIKit.SurfaceHi,
+                        18, !locked, "res-mk" + i);
+                // Invisible hit layer OVER the card, added after it so the label draws under it but
+                // still reads: a coloured button drawn last used to paint over the offer text.
+                if (!offer.bought && !locked) AddHitArea(x, y, cardW, 126, () => BuyMarketOffer(idx), "res-mk-hit" + i);
+                Surface(x + 12, y + 14, 66, 22, new Color(oc.r, oc.g, oc.b, .20f), 11, false, "res-mk-tier" + i);
+                AddText(offer.tier, x + 45, y + 25, 10, oc, FontStyle.Bold, TextAnchor.MiddleCenter, "res-mk-tv" + i);
+                AddText(offer.label, x + 12, y + 58, 14, locked ? RushhouseUIKit.Muted : RushhouseUIKit.Ink,
+                        FontStyle.Bold, TextAnchor.MiddleLeft, "res-mk-l" + i);
+                AddText(offer.desc, x + 12, y + 80, 10, RushhouseUIKit.Muted, FontStyle.Bold, TextAnchor.MiddleLeft, "res-mk-d" + i);
+                AddText(offer.bought ? "OWNED" : locked ? "LOCKED" : offer.cost + " COINS", x + 12, y + 106, 12,
+                        offer.bought ? RushhouseUIKit.Teal : locked ? RushhouseUIKit.Muted : RushhouseUIKit.Gold,
+                        FontStyle.Bold, TextAnchor.MiddleLeft, "res-mk-c" + i);
             }
-            y += 136;
+            y += 146;
         }
         int footY = Mathf.Max(y + 12, H - 130);
         if (success && tips > 0 && !tipsDoubled) {
@@ -5680,11 +5749,13 @@ public class RushhouseUnityGame : MonoBehaviour
             // Tap = SELECT + start dragging. It must NOT change seats — that fired on every touch and
             // made tables impossible to reposition ("masaları düzgün kontrol edemiyoruz"). Seat count
             // is now a deliberate SEATS button (CycleSeats), like ROTATE.
+            var previous = selectedLayout;
             selectedLayout = ApplianceAtScreen(Input.mousePosition);   // pick the prop you clicked
             draggingLayout = selectedLayout != null;
-            if (selectedLayout != null) ShowStationInfo(selectedLayout, 3f);   // bubble = what this unit is
-            else { infoTimer = 0; infoAppliance = null; }                      // empty tap closes the balloon
             RebuildWorld();
+            // The selection card is UI, so it only needs rebuilding when the selection actually
+            // changes -- never during the drag that follows, which runs every frame.
+            if (previous != selectedLayout) BuildLayoutUI();
         }
         if (Input.GetMouseButton(0) && draggingLayout && selectedLayout != null) {
             Vector2 p = ScreenToGamePoint(Input.mousePosition);
@@ -6431,34 +6502,6 @@ public class RushhouseUnityGame : MonoBehaviour
         if (r > .01f) MakeBar("bar-fill", center + new Vector2((r - 1f) * width * .5f, 0), new Vector2(width * r, h * .74f), color, 43);
     }
 
-    Button AddButton(string label, int x, int y, int w, int h, Color color, Action action, string name = "button")
-    {
-        var go = new GameObject(name, typeof(Image), typeof(Button));
-        go.transform.SetParent(uiRoot, false);
-        Place(go.GetComponent<RectTransform>(), x, y, w, h);
-        var img = go.GetComponent<Image>();
-        img.sprite = whiteSprite;
-        img.type = Image.Type.Simple;
-        Color fill = Color.Lerp(new Color(.065f, .078f, .105f, .96f), color, .34f);
-        fill.a = .96f;
-        img.color = fill;
-        img.raycastTarget = true;
-        var b = go.GetComponent<Button>();
-        var colors = b.colors;
-        colors.normalColor = fill;
-        colors.highlightedColor = Color.Lerp(fill, color, .38f);
-        colors.pressedColor = Color.Lerp(fill, color, .58f);
-        colors.selectedColor = colors.highlightedColor;
-        b.colors = colors;
-        b.onClick.AddListener(() => action?.Invoke());
-        AddPanel(x + 4, y + 5, w, h, new Color(.005f, .008f, .014f, .42f), uiRoot, name + "-shadow");
-        AddPanel(x, y, w, h, Color.Lerp(fill, color, .32f), uiRoot, name + "-border");
-        AddPanel(x + 2, y + 2, w - 4, h - 4, fill, uiRoot, name + "-skin");
-        AddPanel(x + 8, y + 7, Mathf.Max(8, w - 16), 3, Color.Lerp(color, Color.white, .18f), uiRoot, name + "-shine");
-        if (!string.IsNullOrEmpty(label)) AddText(label, x + w / 2, y + h / 2, 17, text, FontStyle.Bold, TextAnchor.MiddleCenter, name + "-text");
-        return b;
-    }
-
     // An invisible tap target. A zero-alpha Image still receives raycasts, so this makes a whole
     // card or row clickable without AddButton's rim/face/shine painting over the content on top.
     Button AddHitArea(int x, int y, int w, int h, Action action, string name)
@@ -6569,25 +6612,6 @@ public class RushhouseUnityGame : MonoBehaviour
         AddUIImage(name, MenuSprite(spriteKey), x, y, w, h, color, preserveAspect);
     }
 
-    // ---------- modern UI primitives ----------
-    // Flat "surface" card: drop shadow, dark surface, hairline border and a coloured accent rail at the
-    // top. Replaces the ornate fixed-aspect frames, which couldn't grow with their content.
-    void AddCard(int x, int y, int w, int h, Color accent, string name = "card", float surfaceAlpha = .97f)
-    {
-        AddPanel(x + 4, y + 8, w, h, new Color(0, 0, 0, .38f), uiRoot, name + "-shadow");
-        AddPanel(x, y, w, h, new Color(.16f, .19f, .25f, .9f), uiRoot, name + "-border");
-        AddPanel(x + 2, y + 2, w - 4, h - 4, new Color(.055f, .07f, .1f, surfaceAlpha), uiRoot, name + "-surface");
-        AddPanel(x + 2, y + 2, w - 4, 5, accent, uiRoot, name + "-accent");
-    }
-
-    // Centred status pill (daily special / day event / rush) that stays legible over the 3D room.
-    // Soft filled row/pill used for list items and stat chips.
-    void AddChip(int x, int y, int w, int h, Color tint, string name = "chip", float alpha = .1f)
-    {
-        AddPanel(x, y, w, h, new Color(tint.r, tint.g, tint.b, alpha), uiRoot, name);
-        AddPanel(x, y, 4, h, new Color(tint.r, tint.g, tint.b, .85f), uiRoot, name + "-rail");
-    }
-
     Button AddImageButton(string label, string spriteKey, int x, int y, int w, int h, Action action, string name = "image-button", int fontSize = 13, Color? labelColor = null)
     {
         var go = new GameObject(name, typeof(Image), typeof(Button));
@@ -6612,18 +6636,6 @@ public class RushhouseUnityGame : MonoBehaviour
     }
 
     Sprite UIIcon(string name) => uiIconSprites.TryGetValue(name, out var s) ? s : null;
-
-    // Filled button with an icon glyph on the left and a label beside it (floorplan controls).
-    Button AddIconButton(string label, string icon, int x, int y, int w, int h, Color color, Action action, string name)
-    {
-        var b = AddButton("", x, y, w, h, color, action, name);
-        int iconSz = Mathf.Min(h - 12, 34);
-        bool labelled = !string.IsNullOrEmpty(label);
-        int iconX = labelled ? x + 12 : x + (w - iconSz) / 2;
-        AddUIImage(name + "-ic", UIIcon(icon), iconX, y + (h - iconSz) / 2, iconSz, iconSz, Color.white, true);
-        if (labelled) AddText(label, x + 12 + iconSz + 6 + (w - 12 - iconSz - 6) / 2 - 6, y + h / 2, 13, text, FontStyle.Bold, TextAnchor.MiddleCenter, name + "-lbl");
-        return b;
-    }
 
     void AddUIImage(string name, Sprite sprite, int x, int y, int w, int h, Color color, bool preserveAspect = true)
     {

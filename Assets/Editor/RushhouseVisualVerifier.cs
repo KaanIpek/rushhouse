@@ -1229,4 +1229,166 @@ public static class RushhouseVisualVerifier
         EditorApplication.Exit(0);
     }
 
+
+    // The carry fix was calibrated on a PLATE held facing the camera. An ingredient held facing
+    // SIDEWAYS is a different sprite, a different size and a different CarryOffset, so it gets its
+    // own picture rather than an assumption -- this is the exact case in the bug report (lettuce,
+    // facing right).
+    public static void CaptureCarryIngredient()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+        type.GetMethod("StartDay", flags)?.Invoke(game, null);
+
+        Type itemType = type.GetNestedType("Item", BindingFlags.NonPublic);
+        object lettuce = itemType?.GetMethod("Ingredient", BindingFlags.Public | BindingFlags.Static)
+            ?.Invoke(null, new object[] { "lettuce", "ready" });
+        type.GetField("holding", flags)?.SetValue(game, lettuce);
+        type.GetField("playerFacing", flags)?.SetValue(game, Vector2.right);
+        type.GetField("playerWalking", flags)?.SetValue(game, false);
+        type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
+
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) canvas.enabled = false;
+        Camera cam = Camera.main;
+        float proj = Mathf.Sin(38f * Mathf.Deg2Rad);
+        Vector2 p = (Vector2)type.GetField("playerPos", flags).GetValue(game);
+        float o = 1.15f;
+        cam.orthographicSize = o;
+        cam.transform.position = new Vector3(p.x, 0f, p.y / proj) - cam.transform.forward * 24f;
+
+        Vector3 camPos = cam.transform.position, up = cam.transform.up;
+        Func<Vector3, float> rowOf = w => 320f - Vector3.Dot(w - camPos, up) / o * 320f;
+        foreach (var sr in UnityEngine.Object.FindObjectsByType<SpriteRenderer>(FindObjectsSortMode.None)) {
+            string n = sr.gameObject.name;
+            if (n != "player" && !n.StartsWith("carry-")) continue;
+            Debug.Log(string.Format("INGREDIENT {0,-18} pivotRow={1,7:F1} quadRows={2,7:F1}",
+                n, rowOf(sr.transform.position), Vector3.Dot(sr.bounds.max - sr.bounds.min, up) / o * 320f));
+        }
+        CaptureCamera(Path.Combine(WorkspaceWorkDir(), "audit-ingredient.png"), 640, 640);
+        Debug.Log("INGREDIENT_AUDIT done");
+        EditorApplication.Exit(0);
+    }
+
+
+    // The layout screen with a station TAPPED, which is the one interaction that opens the station
+    // bubble. That bubble is the last thing still drawn in the pre-redesign style, so it needs a
+    // picture before and after like every other screen got.
+    public static void CaptureLayoutTap()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+        type.GetMethod("ShowLayout", flags)?.Invoke(game, null);
+
+        // Select a station and open its bubble, exactly as a tap does.
+        var appliances = type.GetField("appliances", flags)?.GetValue(game) as IList;
+        object target = null;
+        foreach (var a in appliances) {
+            string t = (string)a.GetType().GetField("type").GetValue(a);
+            if (t == "hob" || t == "counter") { target = a; break; }
+        }
+        if (target == null && appliances.Count > 0) target = appliances[0];
+        type.GetField("selectedLayout", flags)?.SetValue(game, target);
+        type.GetMethod("BuildLayoutUI", flags)?.Invoke(game, null);
+        type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
+
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
+        Canvas.ForceUpdateCanvases();
+        RushhouseUIPop.FinishAll();
+        // The framing is computed in ApplyCamera, which only runs from Update -- and Update does not
+        // run in batch mode. Without this the capture shows the PLAY framing and proves nothing.
+        Camera.main.targetTexture = null;
+        Camera.main.aspect = 540f / 960f;
+        type.GetMethod("ApplyCamera", flags)?.Invoke(game, null);
+        CaptureCamera(Path.Combine(WorkspaceWorkDir(), "layout-tap.png"), 540, 960);
+        Debug.Log("LAYOUT_TAP done");
+        EditorApplication.Exit(0);
+    }
+
+
+    // EVERY SCREEN, ONE RUN. See sweep-*.png in the work directory.
+    public static void CaptureSweep()
+    {
+        RushhouseSceneBuilder.BuildMainScene();
+        var game = UnityEngine.Object.FindFirstObjectByType<RushhouseUnityGame>();
+        Type type = typeof(RushhouseUnityGame);
+        BindingFlags flags = BindingFlags.Instance | BindingFlags.NonPublic;
+        type.GetMethod("Awake", flags)?.Invoke(game, null);
+
+        object save = type.GetField("save", flags)?.GetValue(game);
+        Type st = save.GetType();
+        st.GetField("coins")?.SetValue(save, 1450);      // enough that some things are affordable and some are not
+        st.GetField("tokens")?.SetValue(save, 6);
+        st.GetField("day")?.SetValue(save, 7);
+        st.GetField("stars")?.SetValue(save, 3);
+        foreach (string nm in new[] { "waiter", "cook" }) st.GetField(nm)?.SetValue(save, 1);
+
+        var canvas = UnityEngine.Object.FindFirstObjectByType<Canvas>();
+        Action<string> shot = name => {
+            if (canvas) { canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.sortingOrder = 500; canvas.worldCamera = Camera.main; canvas.planeDistance = 1f; }
+            Canvas.ForceUpdateCanvases();
+            RushhouseUIPop.FinishAll();
+            Camera.main.aspect = 540f / 960f;
+            type.GetMethod("ApplyCamera", flags)?.Invoke(game, null);
+            CaptureCamera(Path.Combine(WorkspaceWorkDir(), "sweep-" + name + ".png"), 540, 960);
+        };
+        Action<string, string> screen = (name, method) => {
+            type.GetMethod(method, flags)?.Invoke(game, null);
+            shot(name);
+        };
+
+        screen("01-menu", "ShowMenu");
+        screen("02-studio", "ShowStudio");
+        screen("03-recipes", "ShowRecipes");
+        screen("04-wardrobe", "ShowWardrobe");
+        screen("05-layout", "ShowLayout");
+
+        // Play needs a running day behind it, and a couple of tickets to fill the order rail.
+        type.GetMethod("StartDay", flags)?.Invoke(game, null);
+        MethodInfo motion = type.GetMethod("UpdateCustomerMotion", flags);
+        for (int i = 0; i < 40; i++) motion?.Invoke(game, new object[] { 0.06f });
+        var customers = type.GetField("customers", flags)?.GetValue(game) as IList;
+        if (customers != null) foreach (var c in customers) {
+            var ct = c.GetType();
+            if ((bool)ct.GetField("seated").GetValue(c)) ct.GetField("ordered")?.SetValue(c, true);
+        }
+        type.GetMethod("BuildPlayUI", flags)?.Invoke(game, null);
+        type.GetMethod("RebuildWorld", flags)?.Invoke(game, null);
+        shot("06-play");
+
+        type.GetMethod("DrawPauseOverlay", flags)?.Invoke(game, null);
+        shot("07-pause");
+        type.GetMethod("DrawSettingsOverlay", flags)?.Invoke(game, null);
+        shot("08-settings");
+
+        // DrawOrderDetail returns immediately without a selected ticket, so the previous sweep was
+        // photographing the plain play screen and calling it the detail card.
+        var recipeList = type.GetField("recipes", flags)?.GetValue(game) as IList;
+        object longest = null; int most = -1;
+        foreach (var r in recipeList) {
+            var arr = r.GetType().GetField("parts").GetValue(r) as Array;
+            if (arr != null && arr.Length > most) { most = arr.Length; longest = r; }
+        }
+        type.GetField("detailRecipe", flags)?.SetValue(game, longest);
+        type.GetMethod("BuildPlayUI", flags)?.Invoke(game, null);
+        type.GetMethod("DrawOrderDetail", flags)?.Invoke(game, null);
+        shot("09-order-detail");
+        type.GetField("detailRecipe", flags)?.SetValue(game, null);
+
+        type.GetMethod("DrawResultScreen", flags)?.Invoke(game, new object[] { true });
+        shot("10-result-win");
+        type.GetMethod("DrawResultScreen", flags)?.Invoke(game, new object[] { false });
+        shot("11-result-fail");
+
+        Debug.Log("SWEEP done");
+        EditorApplication.Exit(0);
+    }
+
 }
